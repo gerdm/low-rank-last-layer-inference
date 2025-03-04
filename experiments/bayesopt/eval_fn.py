@@ -11,6 +11,7 @@ class MLPSurrogate(nn.Module):
     def __call__(self, x):
         x = nn.Dense(self.n_hidden)(x)
         x = nn.elu(x)
+        # x = jnp.sin(x)
         x = nn.Dense(self.n_hidden)(x)
         x = nn.elu(x)
         x = nn.Dense(self.n_hidden)(x)
@@ -29,9 +30,9 @@ def minimise_project(guess_init, fun, lbound, ubound):
     opt = ProjectedGradient(
         fun=fun_max,
         projection=_projection, # Enforce boundary constraints
-        stepsize=1e-5,
-        tol=1e-5,
-        maxiter=1000,
+        stepsize=1e-3,
+        tol=1e-6,
+        maxiter=500,
     )
     res = opt.run(guess_init)
     return res
@@ -57,7 +58,7 @@ def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
     out = {
         "x": x_next.squeeze(),
         "y": y_next.squeeze(),
-        "y_best": y_best.squeeze()
+        "y_best": y_best.squeeze(),
     }
 
     state_next = (bel, y_best)
@@ -69,7 +70,7 @@ def test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n
     key_init_x, key_eval = jax.random.split(key)
 
     # Warmup agent
-    x_warmup = jax.random.uniform(key_init_x, shape=(n_warmup, dim), minval=0, maxval=1)
+    x_warmup = jax.random.uniform(key_init_x, shape=(n_warmup, dim), minval=lbound, maxval=ubound)
     y_warmup = jax.vmap(objective_fn)(x_warmup)
     bel_init, _ = agent.scan(bel_init, y_warmup, x_warmup)
     y_next = y_warmup[-1]
@@ -78,9 +79,9 @@ def test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n
     steps = jnp.arange(n_steps)
     state_init = (bel_init, y_next)
     _eval = partial(step, key=key_eval, agent=agent, objective_fn=objective_fn, dim=dim, lbound=lbound, ubound=ubound)
-    bel_final, hist = jax.lax.scan(_eval, state_init, steps)
+    (bel_final, _), hist = jax.lax.scan(_eval, state_init, steps)
 
-    return bel_final, hist["y_best"]
+    return bel_final, hist
 
 
 @partial(jax.jit, static_argnames=("agent", "n_steps", "objective_fn", "dim", "lbound", "ubound", "n_warmup"))
