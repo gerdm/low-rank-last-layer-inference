@@ -11,7 +11,6 @@ class MLPSurrogate(nn.Module):
     def __call__(self, x):
         x = nn.Dense(self.n_hidden)(x)
         x = nn.elu(x)
-        # x = jnp.sin(x)
         x = nn.Dense(self.n_hidden)(x)
         x = nn.elu(x)
         x = nn.Dense(self.n_hidden)(x)
