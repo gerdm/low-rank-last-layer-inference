@@ -3,6 +3,7 @@ Suite of 'stationary' benchmarks
 """
 import jax
 import jax.numpy as jnp
+import flax.linen as nn
 
 def ackley_1d(x, y=0):
     out = (-20*jnp.exp(-0.2*jnp.sqrt(0.5*(x**2 + y**2))) 

@@ -64,9 +64,11 @@ def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
     return state_next, out
 
 
-def test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup=None):
+def test_run(key, n_steps, agent, bel_init_fn, objective_fn, dim, lbound, ubound, n_warmup=None):
     n_warmup = dim if n_warmup is None else n_warmup
-    key_init_x, key_eval = jax.random.split(key)
+    key_init_x, key_eval, key_bel = jax.random.split(key, 3)
+
+    bel_init = bel_init_fn(key_bel)
 
     # Warmup agent
     x_warmup = jax.random.uniform(key_init_x, shape=(n_warmup, dim), minval=lbound, maxval=ubound)
@@ -83,7 +85,9 @@ def test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n
     return bel_final, hist
 
 
-@partial(jax.jit, static_argnames=("agent", "n_steps", "objective_fn", "dim", "lbound", "ubound", "n_warmup"))
+# @partial(jax.jit, static_argnames=("agent", "n_steps", "objective_fn", "dim", "lbound", "ubound", "n_warmup"))
 @partial(jax.vmap, in_axes=(0, None, None, None, None, None, None, None, None))
 def test_runs(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup):
-    return test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup)
+    bel_final, hist = test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup)
+    return hist
+
