@@ -72,7 +72,9 @@ def load_lofi_agent(
     surrogate = MLPSurrogate()
 
     def cov_fn(y): return obs_noise
-    agent = lofi.LowRankPrecisionFilter(surrogate.apply, cov_fn, dynamics_covariance=dynamics_covariance, rank=rank)
+    agent = lofi.LowRankPrecisionFilter(
+        surrogate.apply, cov_fn, dynamics_covariance=dynamics_covariance, rank=rank, inflate_diag=False,
+    )
 
     def bel_init_fn(key):
         params_init = surrogate.init(key, X)
