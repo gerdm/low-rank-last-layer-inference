@@ -1,7 +1,7 @@
 import flax.linen as nn
-from rebayes_mini.methods import low_rank_filter_revised as lrkf
-from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
 from rebayes_mini.methods import low_rank_filter as lofi
+from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
+from rebayes_mini.methods import low_rank_filter_revised as lrkf
 
 class MLPSurrogate(nn.Module):
     n_hidden: int = 180
