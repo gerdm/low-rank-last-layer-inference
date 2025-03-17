@@ -2,6 +2,7 @@ import flax.linen as nn
 from rebayes_mini.methods import low_rank_filter as lofi
 from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
 from rebayes_mini.methods import low_rank_filter_revised as lrkf
+from rebayes_mini.methods import gaussian_process as gp
 
 class MLPSurrogate(nn.Module):
     n_hidden: int = 180
@@ -79,6 +80,20 @@ def load_lofi_agent(
     def bel_init_fn(key):
         params_init = surrogate.init(key, X)
         bel_init = agent.init_bel(params_init, cov=cov_init)
+        return bel_init
+
+    return agent, bel_init_fn
+
+
+def load_gp_agent(
+        X, lenght_scale, nu, buffer_size, obs_noise=0.0
+):
+    dim = X.shape[-1]
+    kernel = gp.matern_kernel(length_scale=lenght_scale, nu=nu)
+    agent = gp.GaussianProcessRegression(obs_variance=obs_noise, kernel=kernel)
+
+    def bel_init_fn(key):
+        bel_init = agent.init_bel(dim_in=dim, buffer_size=buffer_size)
         return bel_init
 
     return agent, bel_init_fn

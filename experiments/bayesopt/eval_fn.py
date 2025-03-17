@@ -37,6 +37,29 @@ def minimise_project(guess_init, fun, lbound, ubound):
     return res
 
 
+def query_next_point_grad(key, fn, dim, lbound, ubound):
+    """
+    Obtain next point to query my maximising the surrogate function.
+    This choice assumes that fn is diferentiable w.r.t. its input
+
+    fn: sampled function to find argmax of
+    """
+    guess_init = jax.random.uniform(key, shape=(dim,), minval=lbound, maxval=ubound)
+    x_next = minimise_project(guess_init, fn, lbound, ubound).params 
+    return x_next
+
+
+def query_next_point_grid(key, fn, dim, lbound, ubound, n_samples=1_000):
+    """
+    Obtain next point to query by maximising the surrogate function.
+    This choice samples from a grid of points and takes the argmax.
+    """
+    x_eval = jax.random.uniform(key, minval=lbound, maxval=ubound, shape=(n_samples, dim))
+    y_surrogate = fn(x_eval)
+    x_next = x_eval[y_surrogate.argmax()]
+    return x_next
+
+
 def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
     bel, y_best = state
     key_step = jax.random.fold_in(key, t)
@@ -44,10 +67,12 @@ def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
 
     # params_sample = agent.sample_params(key_step, bel).squeeze()
     sampled_fn = agent.sample_fn(key_step, bel)
+
     # compute location of next best estimate and actual estimate
-    # TODO: generalise guess_init and minimise_project
-    guess_init = jax.random.uniform(key_guess, shape=(dim,), minval=lbound, maxval=ubound)
-    x_next = minimise_project(guess_init, sampled_fn, lbound, ubound).params 
+    # x_next = query_next_point_grad(key_guess, sampled_fn, dim, lbound, ubound)
+    x_next = query_next_point_grid(key_guess, sampled_fn, dim, lbound, ubound)
+
+    # Obtain true objective
     y_next = objective_fn(x_next)
     # update belief based on true observations
     bel = agent.update(bel, y_next.squeeze(), x_next)
