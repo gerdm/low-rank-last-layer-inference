@@ -46,7 +46,7 @@ def hartmann6(x):
 
 
 
-def ackley(x, a=20, b=0.2, c=2*jnp.pi, lbound=-32.768, ubound=32.768):
+def ackley(x, a=20, b=0.2, c=2*jnp.pi, lbound=-4, ubound=5):
     """
     Ackley function
     For reference, see https://www.sfu.ca/~ssurjano/ackley.html
@@ -94,3 +94,11 @@ def branin(x):
     result = term1 + term2 + s
     
     return result
+
+
+EXPRIMENTS = {
+    "hartmann": hartmann6,
+    "branin": branin,
+    "ackley2": ackley,
+    "ackley5": ackley,
+}

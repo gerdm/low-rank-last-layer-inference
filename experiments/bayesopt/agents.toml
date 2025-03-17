@@ -1,0 +1,24 @@
+[GP]
+    lenght_scale = 0.1 
+    nu = "5/2"
+    buffer_size = 20
+    obs_noise = 0.0
+
+[LRKF]
+    rank = 50
+    cov = 1.0
+    obs_noise = 0.0
+    dynamics_cov = 0.0
+    low_rank_diag = false
+
+[FLoRES]
+    rank = 100
+    cov_hidden = 1e-4 # parameters do not vary much from their initial parameters
+    cov_last = 0.1 # uncertainty in target
+    low_rank_diag = false
+
+[LOFI]
+    rank = 50
+    cov_init = 1e-2
+    obs_noise = 0.01
+    dynamics_covariance = 1e-5

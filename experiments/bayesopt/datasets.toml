@@ -1,0 +1,19 @@
+[config]
+    n_runs = 10
+    key = 314
+
+[experiment.hartmann]
+    dim = 6
+    n_eval = 40
+
+[experiment.branin]
+    dim = 2
+    n_eval = 40
+
+[experiment.ackley2]
+    dim = 2
+    n_eval = 40
+
+[experiment.ackley5]
+    dim = 5
+    n_eval = 100

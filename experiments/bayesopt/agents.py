@@ -1,4 +1,6 @@
+import jax.numpy as jnp
 import flax.linen as nn
+from fractions import Fraction
 from rebayes_mini.methods import low_rank_filter as lofi
 from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
 from rebayes_mini.methods import low_rank_filter_revised as lrkf
@@ -88,7 +90,11 @@ def load_lofi_agent(
 def load_gp_agent(
         X, lenght_scale, nu, buffer_size, obs_noise=0.0
 ):
+    if isinstance(nu, str):
+        nu = float(Fraction(nu))
+
     dim = X.shape[-1]
+    lenght_scale = lenght_scale + jnp.sqrt(dim)
     kernel = gp.matern_kernel(length_scale=lenght_scale, nu=nu)
     agent = gp.GaussianProcessRegression(obs_variance=obs_noise, kernel=kernel)
 
@@ -97,3 +103,11 @@ def load_gp_agent(
         return bel_init
 
     return agent, bel_init_fn
+
+
+AGENTS = {
+    "GP": load_gp_agent,
+    "FLoRES": load_ll_lrkf_agent,
+    "LRKF": load_lrkf_agent,
+    "LOFI": load_lofi_agent
+}
