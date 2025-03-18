@@ -1,10 +1,39 @@
+import optax
 import jax.numpy as jnp
 import flax.linen as nn
 from fractions import Fraction
+from vbll_fifo import Regression, FifoVBLL
 from rebayes_mini.methods import low_rank_filter as lofi
 from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
 from rebayes_mini.methods import low_rank_filter_revised as lrkf
 from rebayes_mini.methods import gaussian_process as gp
+
+
+class VBLLMLP(nn.Module):
+    n_hidden: int = 180
+    wishart_scale = 0.1
+    regularization_weight = 1 / 10.0
+
+    @nn.compact
+    def encode(self, x):
+        x = nn.Dense(self.n_hidden)(x)
+        x = nn.elu(x)
+        x = nn.Dense(self.n_hidden)(x)
+        x = nn.elu(x)
+        x = nn.Dense(self.n_hidden)(x)
+        x = nn.elu(x)
+        return x
+
+    @nn.compact
+    def __call__(self, x):
+        x = self.encode(x)
+        x = Regression(
+            in_features=self.n_hidden, out_features=1,
+            wishart_scale=self.wishart_scale,
+            regularization_weight=1 / 10.0,
+        )(x)
+        return x
+
 
 class MLPSurrogate(nn.Module):
     n_hidden: int = 180
@@ -105,9 +134,38 @@ def load_gp_agent(
     return agent, bel_init_fn
 
 
+def load_fifo_vbll_agent(
+    X, learning_rate, buffer_size, n_inner
+):
+    def lossfn(params, counter, x, y, apply_fn):
+        res = apply_fn(params, x)
+        return res.train_loss_fn(y, counter)
+
+    dim = X.shape[-1]
+
+    surrogate = VBLLMLP()
+    agent = FifoVBLL(
+        surrogate.apply,
+        lossfn,
+        tx=optax.adamw(learning_rate),
+        buffer_size=buffer_size,
+        dim_features=dim,
+        dim_output=1,
+        n_inner=n_inner,
+    )
+
+    def bel_init_fn(key):
+        params_init = surrogate.init(key, X)
+        bel_init = agent.init_bel(params_init)
+        return bel_init
+    
+    return agent, bel_init_fn
+
+
 AGENTS = {
+    "VBLL": load_fifo_vbll_agent,
     "GP": load_gp_agent,
     "FLoRES": load_ll_lrkf_agent,
     "LRKF": load_lrkf_agent,
-    "LOFI": load_lofi_agent
+    "LOFI": load_lofi_agent,
 }

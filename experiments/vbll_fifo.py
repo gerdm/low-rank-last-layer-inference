@@ -4,7 +4,7 @@ Source: https://github.com/VectorInstitute/vbll/blob/main/vbll/jax/layers/regres
 replay-SGD-compatible VBLL
 """
 import jax
-import jax.numpy as jnp 
+import jax.numpy as jnp
 import flax.linen as nn
 from dataclasses import dataclass
 from collections.abc import Callable
@@ -17,7 +17,7 @@ def KL(p, q_scale):
     trace_term = (p.trace_covariance / q_scale).sum(axis=-1)
     logdet_term = (feat_dim * jnp.log(q_scale) - p.logdet_covariance).sum(axis=-1)
 
-    return 0.5 * (mse_term + trace_term + logdet_term)  
+    return 0.5 * (mse_term + trace_term + logdet_term)
 
 @dataclass
 class VBLLReturn:
@@ -91,12 +91,12 @@ class Regression(nn.Module):
 
         out = VBLLReturn(predictive(x), _get_train_loss_fn(x), _get_val_loss_fn(x))
         return out
-    
+
 
 class FifoVBLL(FifoSGD):
     def __init__(self, apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner=1):
         super().__init__(apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner)
-    
+
     def sample_fn(self, key, bel):
         def fn(x):
             pp = self.predict_obs(bel, x)
@@ -104,11 +104,12 @@ class FifoVBLL(FifoSGD):
             return y_sampled
         return fn
 
+    def update(self, bel, y, x):
+        return self.update_state(bel, x, y)
 
     def mean_fn(self, bel, x):
         pp = self.predict_obs(bel, x)
         return pp.predictive.mean
-    
 
     def cov_fn(self, bel, x):
         pp = self.predict_obs(bel, x)
