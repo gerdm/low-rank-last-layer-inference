@@ -101,7 +101,7 @@ class FifoVBLL(FifoSGD):
         def fn(x):
             pp = self.predict_obs(bel, x)
             y_sampled = pp.predictive(rng_key=key)
-            return y_sampled
+            return y_sampled.squeeze()
         return fn
 
     def update(self, bel, y, x):

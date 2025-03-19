@@ -60,7 +60,9 @@ def query_next_point_grid(key, fn, dim, lbound, ubound, n_samples=1_000):
     return x_next
 
 
-def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
+def step(
+        state, t, key, agent, objective_fn, dim, lbound, ubound, query_method="grid"
+):
     bel, y_best = state
     key_step = jax.random.fold_in(key, t)
     key_step, key_guess = jax.random.split(key_step)
@@ -69,8 +71,12 @@ def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
     sampled_fn = agent.sample_fn(key_step, bel)
 
     # compute location of next best estimate and actual estimate
-    # x_next = query_next_point_grad(key_guess, sampled_fn, dim, lbound, ubound)
-    x_next = query_next_point_grid(key_guess, sampled_fn, dim, lbound, ubound)
+    if query_method == "grid":
+        x_next = query_next_point_grid(key_guess, sampled_fn, dim, lbound, ubound)
+    elif query_method == "grad":
+        x_next = query_next_point_grad(key_guess, sampled_fn, dim, lbound, ubound)
+    else:
+        raise ValueError(f"Query method {query_method} not defined")
 
     # Obtain true objective
     y_next = objective_fn(x_next)
@@ -89,7 +95,10 @@ def step(state, t, key, agent, objective_fn, dim, lbound, ubound):
     return state_next, out
 
 
-def test_run(key, n_steps, agent, bel_init_fn, objective_fn, dim, lbound, ubound, n_warmup=None):
+def test_run(
+        key, n_steps, agent, bel_init_fn, objective_fn,
+        dim, lbound, ubound, n_warmup=None, query_method="grid"
+):
     n_warmup = dim if n_warmup is None else n_warmup
     key_init_x, key_eval, key_bel = jax.random.split(key, 3)
 
@@ -104,15 +113,19 @@ def test_run(key, n_steps, agent, bel_init_fn, objective_fn, dim, lbound, ubound
     # Query n_steps
     steps = jnp.arange(n_steps)
     state_init = (bel_init, y_next)
-    _eval = partial(step, key=key_eval, agent=agent, objective_fn=objective_fn, dim=dim, lbound=lbound, ubound=ubound)
+    _eval = partial(
+        step,
+        key=key_eval, agent=agent, objective_fn=objective_fn, dim=dim, lbound=lbound, ubound=ubound,
+        query_method=query_method
+    )
     (bel_final, _), hist = jax.lax.scan(_eval, state_init, steps)
 
     return bel_final, hist
 
 
 # @partial(jax.jit, static_argnames=("agent", "n_steps", "objective_fn", "dim", "lbound", "ubound", "n_warmup"))
-@partial(jax.vmap, in_axes=(0, None, None, None, None, None, None, None, None))
-def test_runs(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup):
-    bel_final, hist = test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup)
+@partial(jax.vmap, in_axes=(0, None, None, None, None, None, None, None, None, None))
+def test_runs(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup, query_method):
+    _, hist = test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup, query_method)
     return hist
 

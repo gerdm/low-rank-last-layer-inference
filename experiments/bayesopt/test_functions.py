@@ -5,6 +5,45 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
+class TrueMLP(nn.Module):
+    n_hidden: int = 50
+
+    def setup(self):
+        self.hidden_1 = nn.Dense(50,
+            bias_init=nn.initializers.normal(1.0),
+            kernel_init=nn.initializers.normal(1.0),
+        )
+
+        self.hidden_2 = nn.Dense(50,
+            bias_init=nn.initializers.normal(1.0),
+            kernel_init=nn.initializers.normal(1.0),
+        )
+
+        self.last = nn.Dense(1,
+            bias_init=nn.initializers.normal(1.0),
+            kernel_init=nn.initializers.normal(1.0),
+        )
+
+    def __call__(self, x):
+        x = self.hidden_1(x)
+        x = nn.relu(x)
+        x = self.hidden_2(x)
+        x = nn.relu(x)
+        x = self.last(x)
+        return x
+    
+
+def init_fn_draw_nn(key, dim):
+    X_init = jnp.ones((1, dim))
+    base_model = TrueMLP()
+    params_base = base_model.init(key, X_init)
+
+    def objective_fn(x):
+        return base_model.apply(params_base, x)
+
+    return objective_fn
+
+
 def ackley_1d(x, y=0):
     out = (-20*jnp.exp(-0.2*jnp.sqrt(0.5*(x**2 + y**2))) 
            - jnp.exp(0.5*(jnp.cos(2*jnp.pi*x) + jnp.cos(2*jnp.pi*y)))
