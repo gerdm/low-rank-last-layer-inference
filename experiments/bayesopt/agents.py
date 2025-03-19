@@ -1,4 +1,5 @@
 import optax
+import rbpf_flores
 import jax.numpy as jnp
 import flax.linen as nn
 from fractions import Fraction
@@ -51,6 +52,32 @@ class MLPSurrogate(nn.Module):
         x = nn.elu(x)
         x = nn.Dense(1, name="last_layer")(x)
         return x
+
+
+def load_ll_lrkf_rbpf_agent(
+        X, rank, cov_hidden=1e-4, cov_last=1.0, low_rank_diag=False,
+        obs_noise=0.0, dynamics_hidden=0.0, dynamics_last=0.0,
+        num_particles=1
+):
+    surrogate = MLPSurrogate()
+
+    def cov_fn(y): return obs_noise # Function interpolation does not require observation noise
+    agent = rbpf_flores.LowRankLastLayerRBPF(
+        surrogate.apply, cov_fn, rank=rank, dynamics_hidden=dynamics_hidden, dynamics_last=dynamics_last,
+        num_particles=num_particles,
+    )
+
+    def bel_init_fn(key):
+        params_init = surrogate.init(key, X)
+        bel_init = agent.init_bel(
+            params_init,
+            cov_hidden=cov_hidden,
+            cov_last=cov_last,
+            low_rank_diag=low_rank_diag,
+        )
+        return bel_init
+
+    return agent, bel_init_fn
 
 
 def load_lrkf_agent(
