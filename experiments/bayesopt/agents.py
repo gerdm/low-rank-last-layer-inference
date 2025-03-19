@@ -10,9 +10,12 @@ from rebayes_mini.methods import gaussian_process as gp
 
 
 class VBLLMLP(nn.Module):
+    """
+    Surrogate MLP for the variational Bayesian last-layer VBLL
+    """
     n_hidden: int = 180
-    wishart_scale = 0.1
-    regularization_weight = 1 / 10.0
+    wishart_scale: float = 0.1
+    regularization_weight: float = 1 / 10.0
 
     @nn.compact
     def encode(self, x):
@@ -30,7 +33,7 @@ class VBLLMLP(nn.Module):
         x = Regression(
             in_features=self.n_hidden, out_features=1,
             wishart_scale=self.wishart_scale,
-            regularization_weight=1 / 10.0,
+            regularization_weight=self.regularization_weight,
         )(x)
         return x
 
@@ -135,7 +138,7 @@ def load_gp_agent(
 
 
 def load_fifo_vbll_agent(
-    X, learning_rate, buffer_size, n_inner
+    X, learning_rate, buffer_size, n_inner, wishart_scale, regularization_weight
 ):
     def lossfn(params, counter, x, y, apply_fn):
         res = apply_fn(params, x)
@@ -143,7 +146,9 @@ def load_fifo_vbll_agent(
 
     dim = X.shape[-1]
 
-    surrogate = VBLLMLP()
+    surrogate = VBLLMLP(
+        wishart_scale=wishart_scale, regularization_weight=regularization_weight
+    )
     agent = FifoVBLL(
         surrogate.apply,
         lossfn,
@@ -163,6 +168,7 @@ def load_fifo_vbll_agent(
 
 
 AGENTS = {
+    "VBLL-greedy": load_fifo_vbll_agent,
     "VBLL": load_fifo_vbll_agent,
     "GP": load_gp_agent,
     "FLoRES": load_ll_lrkf_agent,

@@ -27,7 +27,7 @@ def objective_fn(x):
     return -test_functions.EXPRIMENTS[fn_string](x)
 
 key = jax.random.PRNGKey(key)
-lbound, ubound = 0.0, 1.0 # for hartman and branin
+lbound, ubound = 0.0, 1.0
 keys = jax.random.split(key, n_runs)
 
 res = {}
