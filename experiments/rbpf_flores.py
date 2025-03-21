@@ -31,44 +31,17 @@ class FLoRESState:
     mean_hidden: chex.Array
     loading_hidden: chex.Array
 
-class LowRankLastLayerEnsemble(flores.LowRankLastLayer):
-    def __init__(self, mean_fn_tree, covariance_fn, rank, dynamics_hidden, dynamics_last, num_particles):
-        """
-        FLoRES agent with ensemble of initial covariances.
-        """
-        super().__init__(mean_fn_tree, covariance_fn, rank, dynamics_hidden, dynamics_last)
-        self.num_particles = num_particles
-    
-    def init_bel(self, params, cov_hidden, cov_last, low_rank_diag, key=314):
-        vinit_bel = jax.vmap(super().init_bel, in_axes=(None, None, 0, None, None))
-        bel_init = vinit_bel(params, cov_hidden, cov_last, low_rank_diag, key)
-        return bel_init
-    
-    def predict(self, bel):
-        return jax.vmap(super().predict)(bel)
-    
-    def update(self, bel, y, x):
-        vupdate = jax.vmap(super().update, in_axes=(0, None, None))
-        bel_update = vupdate(bel, y, x)
-        return bel_update
-
-    def sample_fn(self, key, bel):
-        keys = jax.random.split(key, self.num_particles)
-        params = jax.vmap(super().sample_params, in_axes=0)(keys, bel).squeeze()
-        def fn(x):
-            sample_fn = jax.vmap(self.mean_fn, in_axes=(None, 0, None))
-            return sample_fn(bel.mean_hidden[0], params, x).mean(axis=0).squeeze()
-        return fn
-
 
 class LowRankLastLayerRBPF(flores.LowRankLastLayer):
     """
     RBPF for the last-layer
+    # TODO: rename to LowRankLastLayeEnsemble
     """
     def __init__(self, mean_fn_tree, covariance_fn, rank, dynamics_hidden, dynamics_last, num_particles):
         super().__init__(mean_fn_tree, covariance_fn, rank, dynamics_hidden, dynamics_last)
         self.num_particles = num_particles
-        self.pytree_vmap = FLoRESState(mean_last=0, loading_last=0, mean_hidden=None, loading_hidden=None)
+        # self.pytree_vmap = FLoRESState(mean_last=0, loading_last=0, mean_hidden=None, loading_hidden=None)
+        self.pytree_vmap = 0
     
     def init_bel(self, params, cov_hidden, cov_last, low_rank_diag, key=314):
         cov_last = jnp.ones(self.num_particles) * cov_last
@@ -86,12 +59,15 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
         key = jax.random.PRNGKey(key) if isinstance(key, int) else key
         key_hidden, key_params = jax.random.split(key)
         loading_hidden = self._init_low_rank(key_hidden, nparams_hidden, cov_hidden, low_rank_diag)
-        loading_last = cov_last * jnp.eye(nparams_last) # TODO: make it low rank as well?
+        loading_last = cov_last * jnp.eye(nparams_last)
 
         # TODO: do we need this? Should be optional
         init_params_last = jax.random.normal(key_params, (self.num_particles, len(init_params_last))) * jnp.sqrt(cov_last)
         # init_params_last = einops.repeat(init_params_last, "m -> s m", s=self.num_particles)
         loading_last = einops.repeat(loading_last, "i j -> s i j", s=self.num_particles)
+        # Hidden state
+        loading_hidden = einops.repeat(loading_hidden, "i j -> s i j", s=self.num_particles)
+        init_params_hidden = einops.repeat(init_params_hidden, "m -> s m", s=self.num_particles)
         return FLoRESState(
             mean_last=init_params_last,
             loading_last=loading_last,
@@ -119,22 +95,28 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
         return bel, err
 
     def update(self, bel, y, x):
+        # TODO: this should be the RBPF update step
         vmap_update = jax.vmap(self._update, in_axes=(self.pytree_vmap, None, None))
         bel, err = vmap_update(bel, y, x)
 
-        # Generalise RBPF step!
-        ix_max = jnp.linalg.norm(err, axis=-1).argmin()
-        bel = bel.replace(
-            mean_hidden=bel.mean_hidden[ix_max],
-            loading_hidden=bel.loading_hidden[ix_max],
-        )
+        # TODO: Generalise RBPF step!
+        # ix_max = jnp.linalg.norm(err, axis=-1).argmin()
+        # bel = bel.replace(
+        #     mean_hidden=bel.mean_hidden[ix_max],
+        #     loading_hidden=bel.loading_hidden[ix_max],
+        # )
         return bel
 
 
     def sample_fn(self, key, bel):
-        keys = jax.random.split(key, self.num_particles)
-        params = jax.vmap(super().sample_params, in_axes=(0, self.pytree_vmap))(keys, bel).squeeze()
+        key_sample, key_choice = jax.random.split(key)
+        keys = jax.random.split(key_sample, self.num_particles)
+        choose_ix = jax.random.choice(key_choice, self.num_particles)
+        sample_last = jax.vmap(super().sample_params, in_axes=(0, self.pytree_vmap))(keys, bel).squeeze()
+        sample_hidden_single = bel.mean_hidden[choose_ix]
+        sample_last_single = sample_last[choose_ix]
         def fn(x):
-            sfn = jax.vmap(self.mean_fn, in_axes=(None, 0, None))
-            return sfn(bel.mean_hidden, params, x).mean(axis=0).squeeze()
+            return self.mean_fn(sample_hidden_single, sample_last_single, x).squeeze()
+            # sfn = jax.vmap(self.mean_fn, in_axes=(None, 0, None))
+            # return sfn(bel.mean_hidden, sample_last, x).mean(axis=0).squeeze()
         return fn

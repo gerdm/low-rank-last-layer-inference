@@ -31,6 +31,13 @@
     cov_last = 0.1 # uncertainty in target
     low_rank_diag = false
 
+[En-FLoRES]
+    rank = 100
+    cov_hidden = 1e-4
+    cov_last = 0.01
+    low_rank_diag = false
+    num_particles = 10
+
 [LOFI]
     rank = 50
     cov_init = 1e-2

@@ -1,6 +1,7 @@
 [config]
     n_runs = 10
     key = 314
+    query_method = "grid"
 
 [experiment.hartmann]
     dim = 6

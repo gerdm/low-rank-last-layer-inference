@@ -198,6 +198,7 @@ AGENTS = {
     "VBLL-greedy": load_fifo_vbll_agent,
     "VBLL": load_fifo_vbll_agent,
     "GP": load_gp_agent,
+    "En-FLoRES": load_ll_lrkf_rbpf_agent,
     "FLoRES": load_ll_lrkf_agent,
     "LRKF": load_lrkf_agent,
     "LOFI": load_lofi_agent,

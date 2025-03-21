@@ -19,6 +19,7 @@ with open(path_dataset, "r") as f:
     config_experiment = toml.load(f)
     dim = config_experiment["experiment"][fn_string]["dim"]
     n_runs = config_experiment["config"]["n_runs"]
+    query_method = config_experiment["config"]["query_method"]
     key = int(config_experiment["config"]["key"])
     n_steps = config_experiment["experiment"][fn_string]["n_eval"]
     x_test = jnp.zeros(dim)
@@ -39,7 +40,7 @@ for name, load_agent in agents.AGENTS.items():
 
     time_init = time()
     runs = eval_fn.test_runs(
-        keys, n_steps, agent, init_fn, objective_fn, dim, lbound, ubound, dim
+        keys, n_steps, agent, init_fn, objective_fn, dim, lbound, ubound, dim, query_method
     )
     runs = jax.tree.map(np.array, runs)
     time_end = time()
