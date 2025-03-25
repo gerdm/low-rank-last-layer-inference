@@ -108,7 +108,7 @@ def test_run(
     x_warmup = jax.random.uniform(key_init_x, shape=(n_warmup, dim), minval=lbound, maxval=ubound)
     y_warmup = jax.vmap(objective_fn)(x_warmup)
     bel_init, _ = agent.scan(bel_init, y_warmup, x_warmup)
-    y_next = y_warmup[-1]
+    y_next = jnp.max(y_warmup, axis=0)
     
     # Query n_steps
     steps = jnp.arange(n_steps)

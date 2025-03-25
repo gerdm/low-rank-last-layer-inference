@@ -32,7 +32,7 @@ class FLoRESState:
     loading_hidden: chex.Array
 
 
-class LowRankLastLayerRBPF(flores.LowRankLastLayer):
+class LowRankLastLayerEnsemble(flores.LowRankLastLayer):
     """
     RBPF for the last-layer
     # TODO: rename to LowRankLastLayeEnsemble
@@ -43,12 +43,6 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
         # self.pytree_vmap = FLoRESState(mean_last=0, loading_last=0, mean_hidden=None, loading_hidden=None)
         self.pytree_vmap = 0
     
-    def init_bel(self, params, cov_hidden, cov_last, low_rank_diag, key=314):
-        cov_last = jnp.ones(self.num_particles) * cov_last
-        vinit_bel = jax.vmap(super().init_bel, in_axes=(None, None, 0, None, None))
-        state = vinit_bel(params, cov_hidden, cov_last, low_rank_diag, key)
-        return state
-
     def init_bel(self, params, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True, key=314):
         self.rfn, self.mean_fn, init_params_hidden, init_params_last = self._initialise_flat_fn(self.mean_fn_tree, params)
         self.jac_hidden = jax.jacrev(self.mean_fn, argnums=0)

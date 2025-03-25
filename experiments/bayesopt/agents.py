@@ -54,15 +54,15 @@ class MLPSurrogate(nn.Module):
         return x
 
 
-def load_ll_lrkf_rbpf_agent(
+def load_ll_lrkf_ensemble_agent(
         X, rank, cov_hidden=1e-4, cov_last=1.0, low_rank_diag=False,
         obs_noise=0.0, dynamics_hidden=0.0, dynamics_last=0.0,
-        num_particles=1
+        num_particles=2
 ):
     surrogate = MLPSurrogate()
 
     def cov_fn(y): return obs_noise # Function interpolation does not require observation noise
-    agent = rbpf_flores.LowRankLastLayerRBPF(
+    agent = rbpf_flores.LowRankLastLayerEnsemble(
         surrogate.apply, cov_fn, rank=rank, dynamics_hidden=dynamics_hidden, dynamics_last=dynamics_last,
         num_particles=num_particles,
     )
@@ -198,7 +198,7 @@ AGENTS = {
     "VBLL-greedy": load_fifo_vbll_agent,
     "VBLL": load_fifo_vbll_agent,
     "GP": load_gp_agent,
-    "En-FLoRES": load_ll_lrkf_rbpf_agent,
+    "En-FLoRES": load_ll_lrkf_ensemble_agent,
     "FLoRES": load_ll_lrkf_agent,
     "LRKF": load_lrkf_agent,
     "LOFI": load_lofi_agent,
