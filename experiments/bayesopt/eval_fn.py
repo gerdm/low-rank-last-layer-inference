@@ -89,6 +89,9 @@ def step(
         "x": x_next.squeeze(),
         "y": y_next.squeeze(),
         "y_best": y_best.squeeze(),
+        "rho": bel.rho.squeeze(),
+        "log_weight": bel.log_weight.squeeze(),
+        "ess": 1 / jnp.sum(jnp.exp(bel.log_weight) ** 2),
     }
 
     state_next = (bel, y_best)
