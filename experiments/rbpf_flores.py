@@ -222,7 +222,9 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
     def _resample(self, key, log_weights, bel):
         indices = jax.random.categorical(key, log_weights, shape=(self.num_particles,))
         bel = jax.tree.map(lambda x: x[indices], bel)
-        bel = bel.replace(log_weight=jnp.zeros(self.num_particles))
+        log_weights = jnp.zeros(self.num_particles)
+        log_weights = log_weights - jax.nn.logsumexp(log_weights)
+        bel = bel.replace(log_weight=log_weights)
         return bel
     
 
