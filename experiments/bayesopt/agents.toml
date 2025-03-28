@@ -26,13 +26,13 @@
     low_rank_diag = false
 
 [FLoRES]
-    rank = 100
+    rank = 50
     cov_hidden = 1e-4 # parameters do not vary much from their initial parameters
     cov_last = 0.1 # uncertainty in target
     low_rank_diag = false
 
 [En-FLoRES]
-    rank = 100
+    rank = 50
     cov_hidden = 1e-4
     cov_last = 0.01
     low_rank_diag = false

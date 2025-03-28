@@ -153,7 +153,7 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
         loading_hidden = einops.repeat(loading_hidden, "i j -> s i j", s=self.num_particles)
         init_params_hidden = einops.repeat(init_params_hidden, "m -> s m", s=self.num_particles)
 
-        rho_vals = jax.random.normal(key_rho, (self.num_particles,)) * jnp.sqrt(cov_rho)
+        rho_vals = jax.random.normal(key_rho, (self.num_particles,)) * jnp.sqrt(cov_rho) - 5.0
         log_weights = jnp.zeros(self.num_particles)
 
         keys_carry = jax.random.split(key_carry, self.num_particles)
@@ -191,7 +191,12 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
 
         # log_pp = distrax.MultivariateNormalTri(scale_tri=S_half, is_lower=False).log_prob(jnp.atleast_1d(err))
         # log_pp = distrax.Normal(loc=0, scale=jnp.sqrt(jnp.exp(bel.rho))).log_prob(err).squeeze()
-        log_pp = jax.scipy.stats.norm.logpdf(err.squeeze(), loc=0.0, scale=jnp.sqrt(jnp.exp(bel.rho)).squeeze())
+
+        # inverse  multi-quadratic weight
+        # wt = 1 / jnp.sqrt(1 + err ** 2 / 3.0)
+        # log_pp = wt.squeeze() * jax.scipy.stats.norm.logpdf(err.squeeze(), loc=0.0, scale=jnp.sqrt(jnp.exp(bel.rho)).squeeze())
+
+        log_pp = jax.scipy.stats.norm.logpdf(err.squeeze(), loc=0.0, scale=S_half.squeeze())
 
         return err, log_pp, gain_hidden, gain_last, J_hidden, J_last, R_half
 
@@ -220,13 +225,17 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
         return bel, log_pp
 
     def _resample(self, key, log_weights, bel):
-        indices = jax.random.categorical(key, log_weights, shape=(self.num_particles,))
+        key_resample, key_jitter = jax.random.split(key)
+        indices = jax.random.categorical(key_resample, log_weights, shape=(self.num_particles,))
         bel = jax.tree.map(lambda x: x[indices], bel)
-        log_weights = jnp.zeros(self.num_particles)
-        log_weights = log_weights - jax.nn.logsumexp(log_weights)
-        bel = bel.replace(log_weight=log_weights)
+        # bel = bel.replace(
+        #     rho=bel.rho + jax.random.normal(key_jitter, (self.num_particles,)) * 0.01
+        # )
+
+        log_weights = -jnp.log(self.num_particles)
+        bel = bel.replace(log_weight=jnp.full(self.num_particles, log_weights))
         return bel
-    
+
 
     def _update_log_weight(self, key, log_weights, bel):
         bel = bel.replace(
@@ -262,11 +271,14 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
         key_sample, key_choice = jax.random.split(key)
         keys = jax.random.split(key_sample, self.num_particles)
         choose_ix = jax.random.choice(key_choice, self.num_particles)
+        # choose_ix = jax.random.categorical(key_choice, bel.log_weight)
         sample_last = jax.vmap(super().sample_params, in_axes=(0, self.pytree_vmap))(keys, bel).squeeze()
         sample_hidden_single = bel.mean_hidden[choose_ix]
         sample_last_single = sample_last[choose_ix]
         def fn(x):
             return self.mean_fn(sample_hidden_single, sample_last_single, x).squeeze()
-            # sfn = jax.vmap(self.mean_fn, in_axes=(None, 0, None))
-            # return sfn(bel.mean_hidden, sample_last, x).mean(axis=0).squeeze()
+            # sfn = jax.vmap(self.mean_fn, in_axes=(0, 0, None))
+            # samples = sfn(bel.mean_hidden, sample_last, x)
+            # weights = jnp.exp(bel.log_weight)
+            # return jnp.einsum("s...,s->...", samples, weights).squeeze()
         return fn
