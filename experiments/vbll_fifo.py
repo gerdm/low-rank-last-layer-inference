@@ -104,6 +104,9 @@ class FifoVBLL(FifoSGD):
             return y_sampled.squeeze()
         return fn
 
+    def predict(self, bel):
+        return bel
+
     def update(self, bel, y, x):
         return self.update_state(bel, x, y)
 
