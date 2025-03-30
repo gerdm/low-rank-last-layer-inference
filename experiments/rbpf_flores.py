@@ -34,6 +34,21 @@ class FLoRESState:
 
 
 @chex.dataclass
+class FLoRESReplayState:
+    """State of the online last-layer low-rank inference machine"""
+    mean_last: chex.Array
+    loading_last: chex.Array
+    mean_hidden: chex.Array
+    loading_hidden: chex.Array
+    buffer_X: chex.Array
+    buffer_Y: chex.Array
+    counter: chex.Array
+    num_obs: chex.Array
+    runlength: chex.Array = 0
+    log_posterior: chex.Array = 0.0
+
+
+@chex.dataclass
 class FLowUnknownRtState:
     """State of the online last-layer low-rank inference machine"""
     mean_last: chex.Array
@@ -282,3 +297,144 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
             # weights = jnp.exp(bel.log_weight)
             # return jnp.einsum("s...,s->...", samples, weights).squeeze()
         return fn
+
+class LowRankLastLayerReplay(flores.LowRankLastLayer):
+    """
+    Low-rank last-layer RBPF with replay
+    """
+    def __init__(self, mean_fn_tree, cov_fn, rank, dynamics_hidden, dynamics_last, buffer_size=1, p_change=0.01, theshold=0.5):
+        super().__init__(mean_fn_tree, cov_fn, rank, dynamics_hidden, dynamics_last)
+        # self.pytree_vmap = FLowUnknownRtState(mean_last=0, loading_last=0, mean_hidden=0, loading_hidden=0, rho=0, key=None)
+        self.pytree_vmap = 0
+        self.buffer_size = buffer_size
+        self.p_change = p_change
+        self.threshold = theshold
+
+
+    def init_bel(self, params, dim_in, dim_obs, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True, key=314):
+        bel_sup = super().init_bel(params, cov_hidden, cov_last, low_rank_diag, key)
+        bel_replay = FLoRESReplayState(
+            mean_last=bel_sup.mean_last,
+            loading_last=bel_sup.loading_last,
+            mean_hidden=bel_sup.mean_hidden,
+            loading_hidden=bel_sup.loading_hidden,
+            buffer_X=jnp.zeros((self.buffer_size, dim_in)),
+            buffer_Y=jnp.zeros((self.buffer_size, dim_obs)),
+            counter=jnp.zeros((self.buffer_size,)),
+            num_obs=0,
+        )
+        self.init_mean_last = bel_sup.mean_last
+        self.init_loading_last = bel_sup.loading_last
+        self.init_mean_hidden = bel_sup.mean_hidden
+        self.init_loading_hidden = bel_sup.loading_hidden
+        return bel_replay
+
+    def predictive_density(self, bel, x):
+        yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
+        R_half = jnp.linalg.cholesky(jnp.atleast_2d(self.covariance(yhat)), upper=True)
+        # Jacobian for hidden and last layer
+        J_hidden = self.jac_hidden(bel.mean_hidden, bel.mean_last, x)
+        J_last = self.jac_last(bel.mean_hidden, bel.mean_last, x)
+
+        # Upper-triangular cholesky decomposition of the innovation
+        S_half = self.add_sqrt([bel.loading_hidden @ J_hidden.T, bel.loading_last @ J_last.T, R_half])
+        dist = distrax.MultivariateNormalTri(loc=yhat, scale_tri=S_half, is_lower=False)
+        return dist
+
+
+    def compute_log_posterior(self, y, X, bel, bel_prior):
+        log_joint_increase = self.log_predictive_density(y, X, bel) + jnp.log1p(-self.p_change)
+        log_joint_reset = self.log_predictive_density(y, X, bel_prior) + jnp.log(self.p_change)
+
+        # Concatenate log_joints
+        log_joint = jnp.array([log_joint_reset, log_joint_increase])
+        log_joint = jnp.nan_to_num(log_joint, nan=-jnp.inf, neginf=-jnp.inf)
+        # Compute log-posterior before reducing
+        log_posterior_increase = log_joint_increase - jax.nn.logsumexp(log_joint)
+        log_posterior_reset = log_joint_reset - jax.nn.logsumexp(log_joint)
+
+        return log_posterior_increase, log_posterior_reset
+    
+
+    def deflate_belief(self, bel, bel_prior):
+        gamma = jnp.exp(bel.log_posterior)
+        deflate_mean = gamma ** self.deflate_mean
+
+        new_mean = bel.mean_last * deflate_mean  + (1 - deflate_mean) * bel_prior.mean_last
+        new_cov = bel.loading_last * gamma + (1 - gamma) * bel_prior.loading_last
+        bel = bel.replace(mean=new_mean, cov=new_cov)
+        return bel
+
+
+    def log_predictive_density(self, y, X, bel):
+        """
+        compute the log-posterior predictive density
+        of the moment-matched Gaussian
+        """
+        log_p_pred = self.predictive_density(bel, X).log_prob(y).squeeze()
+        return log_p_pred
+    
+    def _update_buffer(self, step, buffer, item):
+        ix_buffer = step % self.buffer_size
+        buffer = buffer.at[ix_buffer].set(item)
+        return buffer
+    
+    def update_single(self, bel, y, x):
+        bel_prior = bel.replace(
+            mean_last=self.init_mean_last,
+            loading_last=self.init_loading_last,
+            # mean_hidden=self.init_mean_hidden,
+            # loading_hidden=self.init_loading_hidden,
+            runlength=0,
+        )
+        log_posterior_increase, log_posterior_reset = self.compute_log_posterior(y, x, bel, bel_prior)
+        bel = bel.replace(runlength=bel.runlength + 1, log_posterior=log_posterior_increase)
+
+        err, gain_hidden, gain_last, J_hidden, J_last, R_half = self.innovation_and_gain(bel, y, x)
+        wt = 1 / jnp.sqrt(1 + err ** 2 / 4.0)
+        R_half = R_half * wt
+
+        mean_hidden, loading_hidden = self._update_hidden(bel, J_hidden, gain_hidden, R_half, err)
+        mean_last, loading_last = self._update_last(bel, J_last, gain_last, R_half, err)
+
+        posterior_increase = jnp.exp(log_posterior_increase)
+        bel_prior = bel_prior.replace(log_posterior=log_posterior_reset)
+
+        bel = bel.replace(
+            mean_hidden=mean_hidden,
+            mean_last=mean_last,
+            loading_hidden=loading_hidden,
+            loading_last=loading_last,
+        )
+
+        no_changepoint = posterior_increase >= self.threshold
+        bel_update = jax.tree.map(
+            lambda update, prior: update * no_changepoint + prior * (1 - no_changepoint),
+            bel, bel_prior
+        )
+
+        return bel_update
+
+
+    def update(self, bel, y, x):
+        # Update buffers
+        bel = bel.replace(num_obs=bel.num_obs + 1)
+        X_update = self._update_buffer(bel.num_obs, bel.buffer_X, x)
+        Y_update = self._update_buffer(bel.num_obs, bel.buffer_Y, y)
+        counter_update = self._update_buffer(bel.num_obs, bel.counter, 1.0)
+        bel = bel.replace(
+            buffer_X=X_update,
+            buffer_Y=Y_update,
+            counter=counter_update
+        )
+
+        def _update_in_buffer(bel, xs):
+            y, x, counter = xs
+            bel_update = self.update_single(bel, y, x)
+            bel = jax.lax.cond(counter==1.0, lambda: bel_update, lambda: bel)
+            return bel, None
+        
+        xs = (bel.buffer_Y, bel.buffer_X, bel.counter)
+        bel, _ = jax.lax.scan(_update_in_buffer, bel, xs)
+
+        return bel
