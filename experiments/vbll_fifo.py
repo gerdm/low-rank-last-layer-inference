@@ -104,6 +104,10 @@ class FifoVBLL(FifoSGD):
             return y_sampled.squeeze()
         return fn
 
+    def sample_predictive(self, key, bel, x):
+        fn = self.sample_fn(key, bel)
+        return fn(x).squeeze()
+
     def predict(self, bel):
         return bel
 
