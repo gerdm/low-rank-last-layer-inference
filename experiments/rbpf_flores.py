@@ -60,6 +60,20 @@ class FLowUnknownRtState:
     log_weight: chex.Array
 
 
+@chex.dataclass
+class FloresIGammaState:
+    """
+    State of the online last-layer low-rank inference machine
+    with unknown inverse gamma distribution
+    """
+    mean_last: chex.Array
+    loading_last: chex.Array
+    mean_hidden: chex.Array
+    loading_hidden: chex.Array
+    alpha: chex.Array
+    beta: chex.Array
+
+
 class LowRankLastLayerEnsemble(flores.LowRankLastLayer):
     """
     Low-rank last-layer ensemble
@@ -329,18 +343,6 @@ class LowRankLastLayerReplay(flores.LowRankLastLayer):
         self.init_loading_hidden = bel_sup.loading_hidden
         return bel_replay
 
-    def predictive_density(self, bel, x):
-        yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
-        R_half = jnp.linalg.cholesky(jnp.atleast_2d(self.covariance(yhat)), upper=True)
-        # Jacobian for hidden and last layer
-        J_hidden = self.jac_hidden(bel.mean_hidden, bel.mean_last, x)
-        J_last = self.jac_last(bel.mean_hidden, bel.mean_last, x)
-
-        # Upper-triangular cholesky decomposition of the innovation
-        S_half = self.add_sqrt([bel.loading_hidden @ J_hidden.T, bel.loading_last @ J_last.T, R_half])
-        dist = distrax.MultivariateNormalTri(loc=yhat, scale_tri=S_half, is_lower=False)
-        return dist
-
 
     def compute_log_posterior(self, y, X, bel, bel_prior):
         log_joint_increase = self.log_predictive_density(y, X, bel) + jnp.log1p(-self.p_change)
@@ -358,11 +360,10 @@ class LowRankLastLayerReplay(flores.LowRankLastLayer):
 
     def deflate_belief(self, bel, bel_prior):
         gamma = jnp.exp(bel.log_posterior)
-        deflate_mean = gamma ** self.deflate_mean
 
-        new_mean = bel.mean_last * deflate_mean  + (1 - deflate_mean) * bel_prior.mean_last
-        new_cov = bel.loading_last * gamma + (1 - gamma) * bel_prior.loading_last
-        bel = bel.replace(mean=new_mean, cov=new_cov)
+        new_mean_last = bel.mean_last * gamma  + (1 - gamma) * bel_prior.mean_last
+        new_loading_last = bel.loading_last * gamma + (1 - gamma) * bel_prior.loading_last
+        bel = bel.replace(mean_last=new_mean_last, loading_last=new_loading_last)
         return bel
 
 
@@ -371,6 +372,7 @@ class LowRankLastLayerReplay(flores.LowRankLastLayer):
         compute the log-posterior predictive density
         of the moment-matched Gaussian
         """
+        y = jnp.atleast_1d(y)
         log_p_pred = self.predictive_density(bel, X).log_prob(y).squeeze()
         return log_p_pred
     
@@ -383,16 +385,15 @@ class LowRankLastLayerReplay(flores.LowRankLastLayer):
         bel_prior = bel.replace(
             mean_last=self.init_mean_last,
             loading_last=self.init_loading_last,
-            # mean_hidden=self.init_mean_hidden,
-            # loading_hidden=self.init_loading_hidden,
+            mean_hidden=self.init_mean_hidden,
+            loading_hidden=self.init_loading_hidden,
             runlength=0,
         )
+        bel = self.deflate_belief(bel, bel_prior)
         log_posterior_increase, log_posterior_reset = self.compute_log_posterior(y, x, bel, bel_prior)
         bel = bel.replace(runlength=bel.runlength + 1, log_posterior=log_posterior_increase)
 
         err, gain_hidden, gain_last, J_hidden, J_last, R_half = self.innovation_and_gain(bel, y, x)
-        wt = 1 / jnp.sqrt(1 + err ** 2 / 4.0)
-        R_half = R_half * wt
 
         mean_hidden, loading_hidden = self._update_hidden(bel, J_hidden, gain_hidden, R_half, err)
         mean_last, loading_last = self._update_last(bel, J_last, gain_last, R_half, err)
@@ -437,4 +438,79 @@ class LowRankLastLayerReplay(flores.LowRankLastLayer):
         xs = (bel.buffer_Y, bel.buffer_X, bel.counter)
         bel, _ = jax.lax.scan(_update_in_buffer, bel, xs)
 
+        return bel
+
+
+class LowRankLastLayerGamma(flores.LowRankLastLayer):
+    """
+    """
+    def __init__(self, mean_fn_tree, rank, dynamics_hidden, dynamics_last):
+        super().__init__(mean_fn_tree, lambda x: x, rank, dynamics_hidden, dynamics_last)
+
+
+    def init_bel(
+        self, params, num_arms,
+        cov_hidden=1.0, cov_last=1.0,
+        beta_prior=1.0, alpha_prior=1.0,
+        low_rank_diag=True, key=314,
+    ):
+        bel_init_sup = super().init_bel(params, cov_hidden, cov_last, low_rank_diag, key)
+
+        bel_init = FloresIGammaState(
+            mean_last=bel_init_sup.mean_last,
+            loading_last=bel_init_sup.loading_last,
+            mean_hidden=bel_init_sup.mean_hidden,
+            loading_hidden=bel_init_sup.loading_hidden,
+            alpha=jnp.ones((num_arms,)) * alpha_prior,
+            beta=jnp.ones((num_arms,)) * beta_prior,
+        )
+
+        return bel_init
+
+
+    def innovation_and_gain(self, bel, y, x):
+        arm = x[0].astype(int)
+        yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
+        R_half = jnp.atleast_2d(jnp.sqrt(bel.beta[arm] / (bel.alpha[arm] - 1)) * jnp.eye(1))
+        # Jacobian for hidden and last layer
+        J_hidden = self.jac_hidden(bel.mean_hidden, bel.mean_last, x)
+        J_last = self.jac_last(bel.mean_hidden, bel.mean_last, x)
+
+        # Innovation
+        err = y - yhat
+
+        # Upper-triangular cholesky decomposition of the innovation
+        S_half = self.add_sqrt([bel.loading_hidden @ J_hidden.T, bel.loading_last @ J_last.T, R_half])
+
+        # Transposed gain matrices
+        M_hidden = jnp.linalg.solve(S_half, jnp.linalg.solve(S_half.T, J_hidden))
+        M_last = jnp.linalg.solve(S_half, jnp.linalg.solve(S_half.T, J_last))
+
+        gain_hidden = M_hidden @ bel.loading_hidden.T @ bel.loading_hidden + M_hidden * self.dynamics_hidden
+        gain_last = M_last @ bel.loading_last.T @ bel.loading_last
+
+        return err, gain_hidden, gain_last, J_hidden, J_last, R_half
+    
+    def update(self, bel, y, x):
+        err, gain_hidden, gain_last, J_hidden, J_last, R_half = self.innovation_and_gain(bel, y, x)
+
+        mean_hidden, loading_hidden = self._update_hidden(bel, J_hidden, gain_hidden, R_half, err)
+        mean_last, loading_last = self._update_last(bel, J_last, gain_last, R_half, err)
+
+        # Update alpha and beta
+        arm = x[0].astype(int)
+        alpha_new = bel.alpha.at[arm].add(1/2)
+        # sq_prev = jnp.linalg.solve(bel.loading_last.T @ bel.loading_last, bel.mean_last) @ bel.mean_last
+        # sq_update = jnp.linalg.solve(loading_last.T @ loading_last, mean_last) @ mean_last
+        beta_new_update = (err ** 2) / 2
+        beta_new = bel.beta.at[arm].add(beta_new_update.squeeze())
+
+        bel = bel.replace(
+            mean_hidden=mean_hidden,
+            mean_last=mean_last,
+            loading_hidden=loading_hidden,
+            loading_last=loading_last,
+            alpha=alpha_new,
+            beta=beta_new,
+        )
         return bel
