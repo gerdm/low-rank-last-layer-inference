@@ -8,12 +8,14 @@ from time import time
 from functools import partial
 from rbpf_flores import LowRankLastLayerGamma
 from rbpf_flores import LowRankLastLayerReplay
+from rbpf_flores import VBLLFlores
 from rebayes_mini.methods import low_rank_last_layer as flores
-from vbll_fifo import Regression, FifoVBLL
+from vbll_fifo import Regression, FifoVBLL, RegressionRefac
 
 path = "../../KuaiRec 2.0/data/arms_05_raw.pkl"
 df_all = pd.read_pickle(path).dropna()
 df_all = df_all.sort_values("time_0")
+df_all = df_all.sample(frac=1.0, random_state=31, replace=False)
 
 
 target_cols = ["like_cnt", "share_cnt", "play_cnt", "play_duration", "comment_cnt"]
@@ -36,6 +38,9 @@ X = X.at[..., 1:].set(jnp.log1p(X[..., 1:]))
 
 
 class FeatureExtractor(nn.Module):
+    """
+    Encoder
+    """
     n_videos: int
     embedding_dim: int
     dense_dim: int
@@ -68,14 +73,6 @@ class MLP(nn.Module):
         return x
 
 
-### Flores ####
-
-key = jax.random.PRNGKey(3141)
-mlp = MLP(n_videos=n_videos, embedding_dim=10, dense_dim=10, n_hidden=50)
-key_init, key_run = jax.random.split(key)
-params_init = mlp.init(key_init, X[0, 0])
-    
-
 def step(state, xs, agent):
     bel, key = state
     yt, xt = xs
@@ -98,23 +95,71 @@ def step(state, xs, agent):
     return state_update, reward_obs
 
 
+class FVBLLMLP(nn.Module):
+    n_videos: int
+    embedding_dim: int
+    dense_dim: int
+    n_hidden: int
+    wishart_scale: float = 0.01
+    regularization_weight: float = 1.0
 
-def cov_fn(y): return jnp.eye(1) * 1e-4
-agent = flores.LowRankLastLayer(mlp.apply, cov_fn, rank=5, dynamics_hidden=0.0, dynamics_last=1e-4)
+
+    @nn.compact
+    def __call__(self, x):
+        x = FeatureExtractor(self.n_videos, self.embedding_dim, self.dense_dim, self.n_hidden)(x)
+        x = RegressionRefac(
+            in_features=self.n_hidden, out_features=1,
+            wishart_scale=self.wishart_scale,
+            regularization_weight=self.regularization_weight,
+            name="last_layer",
+        )(x)
+        return x
 
 
-print("Running agent with Flores")
-bel_init = agent.init_bel(params_init, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True)
-state_init = (bel_init, key_run)
-XS = (jnp.log1p(Y[:50_000]), X[:50_000])
-_step = partial(step, agent=agent)
+### SETUP ####
+key = jax.random.PRNGKey(3141)
+key_init, key_run = jax.random.split(key)
+n_obs = 1000
+
+# Oracle
+rewards_oracle = Y[:n_obs].max(axis=1)
+print(rewards_oracle.sum())
+
+### VBLL-Flores ####
+
+vbl_mlp = FVBLLMLP(n_videos=n_videos, embedding_dim=10, n_hidden=10, dense_dim=10)
+params_init_vbll = vbl_mlp.init(key_init, X[0,0])
+
+
+def vbll_loss(params, x, y):
+    res = vbl_mlp.apply(params, x)
+    loss = res.train_loss_fn(y)
+    return jnp.atleast_1d(loss)
+
+agent = VBLLFlores(
+    vbl_mlp.apply,
+    vbll_loss,
+    rank=20,
+    dynamics_hidden=0.0,
+    dynamics_last=0.0
+)
+bel_init = agent.init_bel(params_init_vbll)
+
+print("*" * 30)
+print("Running agent with Flores+VBLL")
+bel_init = agent.init_bel(params_init_vbll)
+
 time_init = time()
-(bel_final, _), rewards_flores = jax.lax.scan(_step, state_init, XS)
-rewards_flores = np.exp(np.array(rewards_flores)) - 1
+state_init = (bel_init, key_run)
+XS = jnp.log1p(Y[:n_obs]), X[:n_obs]
+_step = partial(step, agent=agent)
+(bel_final_flores, _), rewards_vbll_flores = jax.lax.scan(_step, state_init, XS)
+rewards_vbll_flores = np.exp(np.array(rewards_vbll_flores)) - 1
+print(rewards_vbll_flores[-50:])
 time_end = time()
 
-print(rewards_flores.sum())
-print(f"Running time {time_end - time_init:.2f}", end=2*"\n")
+print(rewards_vbll_flores.sum())
+print(f"Running time {time_end - time_init:0.2f}s", end="\n" * 2)
 
 
 #### VBLL #####
@@ -139,10 +184,10 @@ class VBLLMLP(nn.Module):
         )(x)
         return x
 
-learning_rate = 1e-3
+learning_rate = 1e-4
 buffer_size = 1
-n_inner = 10
-vbl_mlp = VBLLMLP(n_videos=n_videos, embedding_dim=10, n_hidden=50, dense_dim=10)
+n_inner = 1
+vbl_mlp = VBLLMLP(n_videos=n_videos, embedding_dim=10, n_hidden=10, dense_dim=10)
 params_init_vbll = vbl_mlp.init(key_init, X[0,0])
 
 def lossfn(params, counter, x, y, apply_fn):
@@ -167,17 +212,39 @@ bel_init = agent.init_bel(params_init_vbll)
 
 time_init = time()
 state_init = (bel_init, key_run)
-XS = (jnp.log1p(Y[:50_000]), X[:50_000])
+XS = jnp.log1p(Y[:n_obs]), X[:n_obs]
 _step = partial(step, agent=agent)
-(bel_final, _), rewards_vbll = jax.lax.scan(_step, state_init, XS)
-rewards_vbll = np.exp(np.array(rewards_vbll)) - 1
+(bel_final_fifo, _), rewards_vbll_fifo = jax.lax.scan(_step, state_init, XS)
+rewards_vbll_fifo = np.exp(np.array(rewards_vbll_fifo)) - 1
 time_end = time()
 
-print(rewards_vbll.sum())
+print(rewards_vbll_fifo.sum())
 print(f"Running time {time_end - time_init:0.2f}")
 
 
-import matplotlib.pyplot as plt
-# Plot difference in cumulative rewards
-plt.plot(np.cumsum(rewards_flores) - np.cumsum(rewards_vbll), label="Flores - VBLL")
-plt.savefig("cumulative_rewards_diff.png")
+### Flores ####
+
+key = jax.random.PRNGKey(3141)
+mlp = MLP(n_videos=n_videos, embedding_dim=10, dense_dim=10, n_hidden=10)
+key_init, key_run = jax.random.split(key)
+params_init = mlp.init(key_init, X[0, 0])
+    
+
+def cov_fn(y): return jnp.eye(1) * 1e-4
+agent = flores.LowRankLastLayer(mlp.apply, cov_fn, rank=5, dynamics_hidden=0.0, dynamics_last=1e-4)
+
+
+print("Running agent with Flores")
+bel_init = agent.init_bel(params_init, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True)
+state_init = (bel_init, key_run)
+XS = (jnp.log1p(Y[:n_obs]), X[:n_obs])
+_step = partial(step, agent=agent)
+time_init = time()
+(bel_final, _), rewards_flores = jax.lax.scan(_step, state_init, XS)
+rewards_flores = np.exp(np.array(rewards_flores)) - 1
+time_end = time()
+
+print(rewards_flores.sum())
+print(f"Running time {time_end - time_init:.2f}", end=2*"\n")
+
+import pdb; pdb.set_trace()

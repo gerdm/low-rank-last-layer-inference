@@ -26,6 +26,7 @@ class VBLLReturn:
     val_loss_fn: Callable[[jnp.array], jnp.array]
     ood_scores: None | Callable[[jnp.array], jnp.array] = None
 
+
 class Regression(nn.Module):
     in_features: int
     out_features: int
@@ -90,6 +91,78 @@ class Regression(nn.Module):
             return loss_fn
 
         out = VBLLReturn(predictive(x), _get_train_loss_fn(x), _get_val_loss_fn(x))
+        return out
+
+
+class RegressionRefac(nn.Module):
+    in_features: int
+    out_features: int
+    regularization_weight: float
+    parameterization: str = "dense"
+    prior_scale: float = 1.0
+    wishart_scale: float = 1e-2
+    dof: float = 1.0
+
+    def setup(self):
+        self.adjusted_dof = (self.dof + self.out_features + 1.) / 2.
+        self.noise_mean = self.param("noise_mean", nn.initializers.zeros, (self.out_features,))
+        self.noise_logdiag = self.param("noise_logdiag", nn.initializers.normal(), (self.out_features,))
+        self.W_mean = self.param("W_mean", nn.initializers.normal(), (self.out_features, self.in_features))
+        self.W_logdiag = self.param("W_logdiag", nn.initializers.normal(), (self.out_features, self.in_features))
+        if self.parameterization == "dense":
+            self.W_offdiag = self.param("W_offdiag", lambda rng, shape: jax.random.normal(rng, shape) / self.in_features, (self.out_features, self.in_features, self.in_features))
+        else:
+            self.W_offdiag = None
+
+
+    def noise_chol(self):
+        return jnp.exp(self.noise_logdiag)
+
+    def W_chol(self):
+        out = jnp.exp(self.W_logdiag)
+        if self.parameterization == "dense":
+            out = jnp.tril(self.W_offdiag, k=-1) + jnp.diag(out)
+        return out
+
+    def W(self):
+        return DenseNormal(self.W_mean, self.W_chol())
+
+    def noise(self):
+        return Normal(self.noise_mean, self.noise_chol())
+
+    def predictive(self, x):
+        return (self.W() @ x[..., None]).squeeze(-1) + self.noise()
+
+    def _get_train_loss_fn(self, x):
+        def loss_fn(y):
+            W_instance = self.W()
+            noise_instance = self.noise()
+            pred_density = Normal(loc=(W_instance.mean @ x[..., None]).squeeze(-1), scale=noise_instance.scale)
+            pred_likelihood = pred_density.log_prob(y)
+
+            # Modify input x to account for empty elements in buffer
+            x_mod = jnp.expand_dims(x, -2)[..., None]
+            trace_term = 0.5 * ((W_instance.covariance_weighted_inner_prod(x_mod, reduce_dim=False)) * noise_instance.precision)
+            kl_term = KL(W_instance, self.prior_scale)
+            wishart_term = (self.adjusted_dof * noise_instance.logdet_precision - 0.5 * self.wishart_scale * noise_instance.trace_precision)
+
+            # Modify elbo to account for empty elements in buffer
+            total_elbo = ((pred_likelihood.squeeze() - trace_term.squeeze())).mean() # weighted loss
+            total_elbo = total_elbo + self.regularization_weight * (wishart_term - kl_term)
+            return -total_elbo
+        return loss_fn
+
+
+    def _get_val_loss_fn(self, x):
+        def loss_fn(y):
+            return -jnp.mean(self.predictive(x).log_prob(y))
+        return loss_fn
+
+
+    @nn.compact
+    def __call__(self, x, y=None):
+        out = VBLLReturn(self.predictive(x), self._get_train_loss_fn(x), self._get_val_loss_fn(x))
+        # out = self.predictive(x).log_prob(y)
         return out
 
 

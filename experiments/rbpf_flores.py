@@ -3,6 +3,7 @@ import chex
 import einops
 import distrax
 import jax.numpy as jnp
+from jax.flatten_util import ravel_pytree
 from rebayes_mini.methods import low_rank_last_layer as flores
 
 
@@ -136,6 +137,11 @@ class LowRankLastLayerEnsemble(flores.LowRankLastLayer):
 
         return bel
 
+    def sample_predictive(self, key, bel, x):
+        key_choice, key_sample = jax.random.split(key)
+        ix = jax.random.choice(key_choice, self.num_particles)
+        bel_sub = jax.tree.map(lambda x: x[ix], bel)
+        return super().sample_predictive(key_sample, bel_sub, x)
 
     def sample_fn(self, key, bel):
         key_sample, key_choice = jax.random.split(key)
@@ -445,7 +451,7 @@ class LowRankLastLayerGamma(flores.LowRankLastLayer):
     """
     """
     def __init__(self, mean_fn_tree, rank, dynamics_hidden, dynamics_last):
-        super().__init__(mean_fn_tree, lambda x: x, rank, dynamics_hidden, dynamics_last)
+        super().__init__(mean_fn_tree, lambda x: jnp.eye(1) * 1e-4, rank, dynamics_hidden, dynamics_last)
 
 
     def init_bel(
@@ -514,3 +520,107 @@ class LowRankLastLayerGamma(flores.LowRankLastLayer):
             beta=beta_new,
         )
         return bel
+
+class VBLLFlores(flores.LowRankLastLayer):
+    """
+    Variational Bayes for Flores
+    """
+    def __init__(self, mean_fn_tree, loss_fn_tree, rank, dynamics_hidden, dynamics_last):
+        super().__init__(mean_fn_tree, lambda x: jnp.eye(1) * 1e-4, rank, dynamics_hidden, dynamics_last)
+        self.loss_fn_tree = loss_fn_tree
+
+    def _initialise_lossfn(self, lossfn_tree, params):
+        """
+        Initialize ravelled function and gradients
+        """
+        last_layer_params = params["params"]["last_layer"]
+        # dim_last_layer_params = len(ravel_pytree(last_layer_params)[0])
+
+        _, rfn = ravel_pytree(params)
+
+        @jax.jit
+        def loss_fn(params_hidden, params_last, x, y):
+            params = jnp.concat([params_hidden, params_last])
+            return lossfn_tree(rfn(params), x, y)
+
+
+        return loss_fn
+
+    def _initialise_flat_fn(self, apply_fn, params):
+        """
+        Initialize ravelled function and gradients
+        """
+        last_layer_params = params["params"]["last_layer"]
+        dim_last_layer_params = len(ravel_pytree(last_layer_params)[0])
+
+        flat_params, rfn = ravel_pytree(params)
+        flat_params_last = flat_params[-dim_last_layer_params:]
+        flat_params_hidden = flat_params[:-dim_last_layer_params]
+
+        # @jax.jit
+        def mean_fn(params_hidden, params_last, x):
+            params = jnp.concat([params_hidden, params_last])
+            return apply_fn(rfn(params), x)
+
+
+        return rfn, mean_fn, flat_params_hidden, flat_params_last
+    
+    def init_bel(self, params, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True, key=314):
+        """
+        Modified init function to include the loss function
+        """
+        self.lossfn = self._initialise_lossfn(self.loss_fn_tree, params)
+        bel_init = super().init_bel(params, cov_hidden, cov_last, low_rank_diag, key)
+
+        @jax.jit
+        def sample_predictive(key, bel, x):
+            def fn(x):
+                pp = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
+                y_sampled = pp.predictive(rng_key=key)
+                return y_sampled.squeeze()
+            return fn(x)
+
+        self.sample_predictive = sample_predictive       
+
+        return bel_init
+
+    def innovation_and_gain(self, bel, y, x):
+        # yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
+        R_half = jnp.linalg.cholesky(jnp.atleast_2d(self.covariance(y)), upper=True)
+        # Jacobian for hidden and last layer
+        # J_hidden = self.jac_hidden(bel.mean_hidden, bel.mean_last, x)
+        # J_last = self.jac_last(bel.mean_hidden, bel.mean_last, x)
+
+        # Note that this is the negative elbo log-likelihood
+        err = self.lossfn(bel.mean_hidden, bel.mean_last, x, y)
+        J_hidden = jax.jacrev(self.lossfn, argnums=0)(bel.mean_hidden, bel.mean_last, x, y)
+        J_last = jax.jacrev(self.lossfn, argnums=1)(bel.mean_hidden, bel.mean_last, x, y)
+
+        # Upper-triangular cholesky decomposition of the innovation
+        S_half = self.add_sqrt([bel.loading_hidden @ J_hidden.T, bel.loading_last @ J_last.T, R_half])
+
+        # Transposed gain matrices
+        M_hidden = jnp.linalg.solve(S_half, jnp.linalg.solve(S_half.T, J_hidden))
+        M_last = jnp.linalg.solve(S_half, jnp.linalg.solve(S_half.T, J_last))
+
+        gain_hidden = M_hidden @ bel.loading_hidden.T @ bel.loading_hidden + M_hidden * self.dynamics_hidden
+        gain_last = M_last @ bel.loading_last.T @ bel.loading_last
+
+        return err, gain_hidden, gain_last, J_hidden, J_last, R_half
+
+    def _sample_fn(self, key, bel):
+        def fn(x):
+            pp = self.predict_obs(bel, x)
+            y_sampled = pp.predictive(rng_key=key)
+            return y_sampled.squeeze()
+        return fn
+
+    def _sample_predictive(self, key, bel, x):
+        fn = self.sample_fn(key, bel)
+        return fn(x).squeeze()
+
+    def predict(self, bel):
+        return bel
+
+    # def predict_obs(self, bel, x):
+    #     return self.mean_fn(bel.mean_hidden, bel.mean_last, x)
