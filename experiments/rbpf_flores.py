@@ -156,6 +156,7 @@ class LowRankLastLayerEnsemble(flores.LowRankLastLayer):
             # return sfn(bel.mean_hidden, sample_last, x).mean(axis=0).squeeze()
         return fn
 
+
 class LowRankLastLayerRBPF(flores.LowRankLastLayer):
     """
     RBPF for the last-layer with unknown observation noise (Rt)
@@ -317,6 +318,7 @@ class LowRankLastLayerRBPF(flores.LowRankLastLayer):
             # weights = jnp.exp(bel.log_weight)
             # return jnp.einsum("s...,s->...", samples, weights).squeeze()
         return fn
+
 
 class LowRankLastLayerReplay(flores.LowRankLastLayer):
     """
@@ -521,6 +523,15 @@ class LowRankLastLayerGamma(flores.LowRankLastLayer):
         )
         return bel
 
+
+def compute_eff(Wt, x):
+  """Computes (Wt.T @ Wt)^+ @ x efficiently."""
+  M = Wt @ Wt.T                 # Small (d, d) matrix
+  M_pinv = jnp.linalg.pinv(M)   # Pseudoinverse of M
+  w = Wt.T @ (M_pinv @ M_pinv) @ (Wt @ x) # Combine steps
+  return w
+
+
 class VBLLFlores(flores.LowRankLastLayer):
     """
     Variational Bayes for Flores
@@ -541,7 +552,7 @@ class VBLLFlores(flores.LowRankLastLayer):
         @jax.jit
         def loss_fn(params_hidden, params_last, x, y):
             params = jnp.concat([params_hidden, params_last])
-            return lossfn_tree(rfn(params), x, y)
+            return lossfn_tree(rfn(params), x, y).squeeze()
 
 
         return loss_fn
@@ -572,6 +583,9 @@ class VBLLFlores(flores.LowRankLastLayer):
         self.lossfn = self._initialise_lossfn(self.loss_fn_tree, params)
         bel_init = super().init_bel(params, cov_hidden, cov_last, low_rank_diag, key)
 
+        # loading_last = jax.random.orthogonal(jax.random.PRNGKey(31415), len(bel_init.mean_last))
+        # bel_init = bel_init.replace(loading_last=loading_last)
+
         @jax.jit
         def sample_predictive(key, bel, x):
             def fn(x):
@@ -584,43 +598,39 @@ class VBLLFlores(flores.LowRankLastLayer):
 
         return bel_init
 
-    def innovation_and_gain(self, bel, y, x):
-        # yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
-        R_half = jnp.linalg.cholesky(jnp.atleast_2d(self.covariance(y)), upper=True)
-        # Jacobian for hidden and last layer
-        # J_hidden = self.jac_hidden(bel.mean_hidden, bel.mean_last, x)
-        # J_last = self.jac_last(bel.mean_hidden, bel.mean_last, x)
-
-        # Note that this is the negative elbo log-likelihood
-        err = self.lossfn(bel.mean_hidden, bel.mean_last, x, y)
-        J_hidden = jax.jacrev(self.lossfn, argnums=0)(bel.mean_hidden, bel.mean_last, x, y)
-        J_last = jax.jacrev(self.lossfn, argnums=1)(bel.mean_hidden, bel.mean_last, x, y)
-
-        # Upper-triangular cholesky decomposition of the innovation
-        S_half = self.add_sqrt([bel.loading_hidden @ J_hidden.T, bel.loading_last @ J_last.T, R_half])
-
-        # Transposed gain matrices
-        M_hidden = jnp.linalg.solve(S_half, jnp.linalg.solve(S_half.T, J_hidden))
-        M_last = jnp.linalg.solve(S_half, jnp.linalg.solve(S_half.T, J_last))
-
-        gain_hidden = M_hidden @ bel.loading_hidden.T @ bel.loading_hidden + M_hidden * self.dynamics_hidden
-        gain_last = M_last @ bel.loading_last.T @ bel.loading_last
-
-        return err, gain_hidden, gain_last, J_hidden, J_last, R_half
-
-    def _sample_fn(self, key, bel):
-        def fn(x):
-            pp = self.predict_obs(bel, x)
-            y_sampled = pp.predictive(rng_key=key)
-            return y_sampled.squeeze()
-        return fn
-
-    def _sample_predictive(self, key, bel, x):
-        fn = self.sample_fn(key, bel)
-        return fn(x).squeeze()
 
     def predict(self, bel):
         return bel
 
-    # def predict_obs(self, bel, x):
-    #     return self.mean_fn(bel.mean_hidden, bel.mean_last, x)
+    def _update_hidden(self, bel, J):
+        gain_matrix = [bel.loading_hidden, J[None, :]]
+        loading_hidden = self.add_project(gain_matrix)
+        gain = compute_eff(jnp.concat(gain_matrix, axis=0), J)
+        mean_hidden = bel.mean_hidden - gain
+
+        return mean_hidden, loading_hidden
+
+
+    def _update_last(self, bel, J):
+        gain_matrix = [bel.loading_last, J[None, :]]
+        loading_last = self.add_sqrt(gain_matrix)
+        gain = compute_eff(jnp.concat(gain_matrix, axis=0), J)
+        mean_last = bel.mean_last - gain
+
+        return mean_last, loading_last
+
+
+    def update(self, bel, y, x):
+        J_hidden = jax.grad(self.lossfn, argnums=0)(bel.mean_hidden, bel.mean_last, x, y)
+        J_last = jax.grad(self.lossfn, argnums=1)(bel.mean_hidden, bel.mean_last, x, y)
+
+        mean_hidden, loading_hidden = self._update_hidden(bel, J_hidden)
+        mean_last, loading_last = self._update_last(bel, J_last)
+
+        bel = bel.replace(
+            mean_hidden=mean_hidden,
+            mean_last=mean_last,
+            loading_hidden=loading_hidden,
+            loading_last=loading_last,
+        )
+        return bel
