@@ -1,6 +1,6 @@
 [config]
     n_runs = 10
-    key = 314
+    key = 3141
     query_method = "grid"
 
 [experiment.hartmann]
@@ -16,5 +16,13 @@
     n_eval = 40
 
 [experiment.ackley5]
+    dim = 5
+    n_eval = 100
+
+[experiment.ackley10]
+    dim = 5
+    n_eval = 100
+
+[experiment.ackley50]
     dim = 5
     n_eval = 100

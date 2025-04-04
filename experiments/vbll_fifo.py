@@ -4,8 +4,10 @@ Source: https://github.com/VectorInstitute/vbll/blob/main/vbll/jax/layers/regres
 replay-SGD-compatible VBLL
 """
 import jax
+import distrax
 import jax.numpy as jnp
 import flax.linen as nn
+from jax.flatten_util import ravel_pytree
 from dataclasses import dataclass
 from collections.abc import Callable
 from rebayes_mini.methods.replay_sgd import FifoSGD
@@ -133,21 +135,24 @@ class RegressionRefac(nn.Module):
     def predictive(self, x):
         return (self.W() @ x[..., None]).squeeze(-1) + self.noise()
 
+
     def _get_train_loss_fn(self, x):
-        def loss_fn(y):
+        def loss_fn(y, counter):
             W_instance = self.W()
             noise_instance = self.noise()
             pred_density = Normal(loc=(W_instance.mean @ x[..., None]).squeeze(-1), scale=noise_instance.scale)
             pred_likelihood = pred_density.log_prob(y)
 
             # Modify input x to account for empty elements in buffer
-            x_mod = jnp.expand_dims(x, -2)[..., None]
+            # x_mod = jnp.expand_dims(x, -2)[..., None]
+            x_mod = jnp.expand_dims(x * counter[:, None], -2)[..., None]
             trace_term = 0.5 * ((W_instance.covariance_weighted_inner_prod(x_mod, reduce_dim=False)) * noise_instance.precision)
             kl_term = KL(W_instance, self.prior_scale)
             wishart_term = (self.adjusted_dof * noise_instance.logdet_precision - 0.5 * self.wishart_scale * noise_instance.trace_precision)
 
             # Modify elbo to account for empty elements in buffer
-            total_elbo = ((pred_likelihood.squeeze() - trace_term.squeeze())).mean() # weighted loss
+            # total_elbo = ((pred_likelihood.squeeze() - trace_term.squeeze())).mean() # weighted loss
+            total_elbo = ((pred_likelihood.squeeze() - trace_term.squeeze()) * counter).sum() / counter.sum() # weighted loss
             total_elbo = total_elbo + self.regularization_weight * (wishart_term - kl_term)
             return -total_elbo
         return loss_fn
@@ -194,3 +199,73 @@ class FifoVBLL(FifoSGD):
     def cov_fn(self, bel, x):
         pp = self.predict_obs(bel, x)
         return pp.predictive.covariance_diagonal
+
+
+class FifoLaplaceDiag(FifoSGD):
+    """
+    TODO: rename to FifoLaplaceReg
+    """
+    def __init__(self, apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner=1):
+        super().__init__(apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner)
+
+    def sample_fn(self, key, bel):
+        # Sample from last-layer params
+        params_sample = self.sample_params(key, bel)
+        def fn(x):
+            return self.apply_fn(params_sample, x).squeeze()
+        return fn
+
+    def sample_params(self, key, bel):
+        # Get last-layer params
+        params = jax.tree.map(jnp.copy, bel.params)
+        params_all_flat, rfn_all = ravel_pytree(params)
+        params_last = params["params"].pop("last_layer")
+        params_last_flat, rfn = ravel_pytree(params_last)
+        params_hidden_flat, rfn_hidden = ravel_pytree(params["params"])
+
+        def lossfn(params_last, params_hidden, counter, X, y):
+            params = {
+                "params": {
+                    "last_layer": rfn(params_last),
+                    **params_hidden,
+                }
+            }
+            return self.lossfn(params, counter, X, y, self.apply_fn).squeeze()
+        
+        # vhessian = jax.vmap(jax.hessian(lossfn, argnums=0), in_axes=(None, None, 0, 0, 0))
+        vgrad = jax.vmap(jax.grad(lossfn, argnums=0), in_axes=(None, None, 0, 0, 0))
+        # hessian = vhessian(params_last_flat, params["params"], bel.counter, bel.buffer_X, bel.buffer_y)
+        grad = vgrad(params_last_flat, params["params"], bel.counter, bel.buffer_X, bel.buffer_y)
+        grad = jnp.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
+        grad_norm = jnp.linalg.norm(grad, axis=-1, keepdims=True)
+        grad = grad / (grad_norm + 1e-6)  # Normalize gradients to have unit norm
+
+        hessian = jnp.einsum("ij,ik->ijk", grad, grad)
+        H = (hessian * bel.counter[:, None, None]).sum(axis=0) / bel.counter.sum() + 1e-4 * jnp.eye(hessian.shape[-1])
+
+        # Compute cholesky decomposition
+        # U = jnp.linalg.cholesky(H).T
+        # Compute SVD of the Hessian
+        U, _, _ = jnp.linalg.svd(H)  # Only need U for sampling
+
+        # Sample from standard normal
+        z = jax.random.normal(key, shape=params_last_flat.shape)
+        # Compute sample
+        params_last_sample = params_last_flat + jnp.linalg.solve(U.T, z)
+        # concatanate sampled params with the rest of the params
+        params_sample = jnp.concatenate([params_hidden_flat, params_last_sample])
+        # rebund the params
+        params_sample = rfn_all(params_sample)
+        return params_sample
+    
+
+    def predictive_density(self, bel, x):
+        raise NotImplementedError("Predictive density not implemented for FifoLaplaceDiag")
+
+    def sample_predictive(self, key, bel, x):
+        dist = self.predictive_density(bel, x)
+        sample = dist.sample(seed=key)
+        return sample
+
+    def update(self, bel, y, x):
+        return self.update_state(bel, x, y)

@@ -4,6 +4,35 @@ import flax.linen as nn
 from functools import partial
 from jaxopt import ProjectedGradient
 
+from scipy.stats.qmc import Sobol
+
+def generate_sobol_sequence_jax(num_samples: int, dim: int = 200, scramble: bool = True, seed: int = 0):
+    """
+    Generate a Sobol sequence and return it as a JAX array.
+
+    Args:
+        num_samples (int): Number of Sobol samples to generate.
+        dim (int): Dimensionality of the space (default 200).
+        scramble (bool): Whether to scramble the sequence for better uniformity.
+        seed (int): Random seed used for scrambling.
+
+    Returns:
+        jax.numpy.DeviceArray: A (num_samples, dim) Sobol sequence in [0, 1).
+    """
+    sampler = Sobol(d=dim, scramble=scramble, seed=seed)
+    samples_np = sampler.random(n=num_samples)  # shape: (num_samples, dim)
+    samples_jax = jnp.array(samples_np)
+    return samples_jax
+
+
+n_samples = 2 ** 10
+dims = [1, 2, 3, 5, 6, 10, 20, 50, 100, 200]
+grids = {
+    dim: generate_sobol_sequence_jax(n_samples, dim) for dim in dims
+}
+
+generate_sobol_sequence_jax(2 ** 11, 200)
+
 class MLPSurrogate(nn.Module):
     n_hidden: int = 180
 
@@ -54,7 +83,8 @@ def query_next_point_grid(key, fn, dim, lbound, ubound, n_samples=1_000):
     Obtain next point to query by maximising the surrogate function.
     This choice samples from a grid of points and takes the argmax.
     """
-    x_eval = jax.random.uniform(key, minval=lbound, maxval=ubound, shape=(n_samples, dim))
+    # x_eval = jax.random.uniform(key, minval=lbound, maxval=ubound, shape=(n_samples, dim))
+    x_eval = lbound + grids[dim] * (ubound - lbound)
     y_surrogate = fn(x_eval)
     x_next = x_eval[y_surrogate.argmax()]
     return x_next

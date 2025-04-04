@@ -7,10 +7,10 @@
 
 [VBLL-greedy]
     learning_rate = 1e-3
-    buffer_size = 1
+    buffer_size = 10
     n_inner = 100
-    wishart_scale = 0.1
-    regularization_weight = 1.0
+    wishart_scale = 0.01
+    regularization_weight = 0.0
 
 [GP]
     lenght_scale = 0.1 
@@ -27,19 +27,25 @@
 
 [FLoRES]
     rank = 50
-    cov_hidden = 1e-4 # parameters do not vary much from their initial parameters
-    cov_last = 0.1 # uncertainty in target
+    cov_hidden = 1e-4
+    cov_last = 1.0
     low_rank_diag = false
 
 [En-FLoRES]
     rank = 50
     cov_hidden = 1e-4
     cov_last = 0.01
-    low_rank_diag = false
-    num_particles = 10
+    low_rank_diag = true
+    num_particles = 5
 
 [LOFI]
     rank = 50
     cov_init = 1e-2
     obs_noise = 0.01
     dynamics_covariance = 1e-5
+
+[laplace]
+    learning_rate=1e-4
+    buffer_size=50
+    n_inner=2
+    noise=0.1

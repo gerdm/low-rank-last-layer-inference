@@ -40,7 +40,7 @@ X = X.at[..., 1:].set(jnp.log1p(X[..., 1:]))
 # cols_org = jnp.arange(6)
 # cols_new = jnp.array([0, 2, 1, 3, 5, 4])
 
-# Optional rearrangement of the columns for "changes" in the feature space
+# # Optional rearrangement of the columns for "changes" in the feature space
 # X1 = X.at[:25_000, :, cols_org].get()
 # X2 = X.at[25_000:, :, cols_new].get()
 # X = jnp.concatenate([X1, X2], axis=0)
@@ -127,47 +127,11 @@ class FVBLLMLP(nn.Module):
 ### SETUP ####
 key = jax.random.PRNGKey(3141)
 key_init, key_run = jax.random.split(key)
-n_obs = 10_000
+n_obs = 50_000
 
 # Oracle
 rewards_oracle = Y[:n_obs].max(axis=1)
 print(rewards_oracle.sum())
-
-### VBLL-Flores ####
-
-vbl_mlp = FVBLLMLP(n_videos=n_videos, embedding_dim=10, n_hidden=10, dense_dim=10, regularization_weight=0.0)
-params_init_vbll = vbl_mlp.init(key_init, X[0,0])
-
-
-def vbll_loss(params, x, y):
-    res = vbl_mlp.apply(params, x)
-    loss = res.train_loss_fn(y)
-    return loss
-
-agent = VBLLFlores(
-    vbl_mlp.apply,
-    vbll_loss,
-    rank=50,
-    dynamics_hidden=0.0,
-    dynamics_last=0.0
-)
-
-print("*" * 30)
-print("Running agent with Flores+VBLL")
-bel_init = agent.init_bel(params_init_vbll, cov_hidden=1.0, cov_last=1.0, low_rank_diag=False)
-
-time_init = time()
-state_init = (bel_init, key_run)
-XS = jnp.log1p(Y[:n_obs]), X[:n_obs]
-_step = partial(step, agent=agent)
-(bel_final_flores, _), rewards_vbll_flores = jax.lax.scan(_step, state_init, XS)
-rewards_vbll_flores = np.exp(np.array(rewards_vbll_flores)) - 1
-time_end = time()
-
-print(rewards_vbll_flores.sum())
-print(f"Running time {time_end - time_init:.2f}", end=2*"\n")
-
-import pdb; pdb.set_trace()
 
 # ### Flores ####
 
@@ -175,16 +139,16 @@ mlp = MLP(n_videos=n_videos, embedding_dim=10, dense_dim=10, n_hidden=10)
 params_init = mlp.init(key_init, X[0, 0])
     
 
-def cov_fn(y): return jnp.eye(1) * 0.34 ** 2
+def cov_fn(y): return jnp.eye(1) * 1e-6
 agent = flores.LowRankLastLayer(mlp.apply, cov_fn, rank=20, dynamics_hidden=0.0, dynamics_last=0.0)
-# agent = LowRankLastLayerGamma(mlp.apply, rank=20, dynamics_hidden=0.0, dynamics_last=1e-4)
+# agent = LowRankLastLayerGamma(mlp.apply, rank=20, dynamics_hidden=0.0, dynamics_last=0.0)
 # agent = LowRankLastLayerEnsemble(mlp.apply, cov_fn, rank=20, dynamics_hidden=0.0, dynamics_last=0.0, num_particles=5)
 
 
 print("*" * 30)
-print("Running agent with Flores")
-# bel_init = agent.init_bel(params_init, n_videos, alpha_prior=3, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True)
-bel_init = agent.init_bel(params_init, cov_hidden=1.0, cov_last=1.0, low_rank_diag=False)
+print("Running agent with Ensemble Flores")
+# bel_init = agent.init_bel(params_init, num_arms=n_videos, alpha_prior=10, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True)
+bel_init = agent.init_bel(params_init, cov_hidden=1.0, cov_last=1.0, low_rank_diag=True)
 state_init = (bel_init, key_run)
 XS = (jnp.log1p(Y[:n_obs]), X[:n_obs])
 _step = partial(step, agent=agent)
@@ -196,6 +160,29 @@ time_end = time()
 print(rewards_flores.sum())
 print(f"Running time {time_end - time_init:.2f}", end=2*"\n")
 
+ ### Flores Ensemble ####
+
+mlp = MLP(n_videos=n_videos, embedding_dim=10, dense_dim=10, n_hidden=10)
+params_init = mlp.init(key_init, X[0, 0])
+    
+
+def cov_fn(y): return jnp.eye(1) * 1e-6
+agent = LowRankLastLayerEnsemble(mlp.apply, cov_fn, rank=20, dynamics_hidden=0.0, dynamics_last=0.0, num_particles=5)
+
+
+print("*" * 30)
+print("Running agent with Ensemble Flores")
+bel_init = agent.init_bel(params_init, cov_hidden=1.0, cov_last=10.0, low_rank_diag=True)
+state_init = (bel_init, key_run)
+XS = (jnp.log1p(Y[:n_obs]), X[:n_obs])
+_step = partial(step, agent=agent)
+time_init = time()
+(bel_final, _), rewards_flores_ensemble = jax.lax.scan(_step, state_init, XS)
+rewards_flores_ensemble = np.exp(np.array(rewards_flores_ensemble)) - 1
+time_end = time()
+
+print(rewards_flores_ensemble.sum())
+print(f"Running time {time_end - time_init:.2f}", end=2*"\n")
 
 
 ### VBLL #####
@@ -223,7 +210,7 @@ class VBLLMLP(nn.Module):
 learning_rate = 1e-3
 buffer_size = 1
 n_inner = 5
-vbl_mlp = VBLLMLP(n_videos=n_videos, embedding_dim=10, n_hidden=10, dense_dim=10)
+vbl_mlp = VBLLMLP(n_videos=n_videos, embedding_dim=10, n_hidden=10, dense_dim=10, regularization_weight=0.0)
 params_init_vbll = vbl_mlp.init(key_init, X[0,0])
 
 def lossfn(params, counter, x, y, apply_fn):
@@ -263,10 +250,8 @@ print(f"Running time {time_end - time_init:0.2f}")
 #### PLOTTING ####
 
 import matplotlib.pyplot as plt
-plt.plot(rewards_flores.cumsum(), label="l2-flores")
-plt.plot(rewards_vbll_fifo.cumsum(), label="vbll-fifo")
-plt.plot(rewards_vbll_flores.cumsum(), label="vbll-Flores")
+plt.plot(rewards_flores.cumsum(), label="flores")
+plt.plot(rewards_flores_ensemble.cumsum(), label="en-flores")
+plt.plot(rewards_vbll_fifo.cumsum(), label="On-VBLL")
 plt.legend()
 plt.savefig("rewards_cumulative.png")
-
-import pdb; pdb.set_trace()

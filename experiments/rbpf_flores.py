@@ -453,7 +453,7 @@ class LowRankLastLayerGamma(flores.LowRankLastLayer):
     """
     """
     def __init__(self, mean_fn_tree, rank, dynamics_hidden, dynamics_last):
-        super().__init__(mean_fn_tree, lambda x: jnp.eye(1) * 1e-4, rank, dynamics_hidden, dynamics_last)
+        super().__init__(mean_fn_tree, lambda x: jnp.eye(1) * 0.0, rank, dynamics_hidden, dynamics_last)
 
 
     def init_bel(
@@ -474,6 +474,21 @@ class LowRankLastLayerGamma(flores.LowRankLastLayer):
         )
 
         return bel_init
+
+    def predictive_density(self, bel, x):
+        arm = x[0].astype(int)
+        yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x)
+        R_half = jnp.linalg.cholesky(jnp.atleast_2d(self.covariance(bel)), upper=True)
+        # R_half = jnp.sqrt(bel.beta[arm] / (bel.alpha[arm] - 1)) * jnp.eye(1)
+        # Jacobian for hidden and last layer
+        J_hidden = self.jac_hidden(bel.mean_hidden, bel.mean_last, x)
+        J_last = self.jac_last(bel.mean_hidden, bel.mean_last, x)
+
+        # Upper-triangular cholesky decomposition of the innovation
+        S_half = self.add_sqrt([bel.loading_hidden @ J_hidden.T, bel.loading_last @ J_last.T, R_half])
+        # S_half = self.add_sqrt([bel.loading_last @ J_last.T, R_half])
+        dist = distrax.Normal(loc=yhat, scale=S_half.squeeze())
+        return dist
 
 
     def innovation_and_gain(self, bel, y, x):

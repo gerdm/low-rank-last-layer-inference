@@ -1,9 +1,11 @@
+import jax
 import optax
 import rbpf_flores
 import jax.numpy as jnp
 import flax.linen as nn
+import distrax
 from fractions import Fraction
-from vbll_fifo import Regression, FifoVBLL
+from vbll_fifo import Regression, FifoVBLL, FifoLaplaceDiag
 from rebayes_mini.methods import low_rank_filter as lofi
 from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
 from rebayes_mini.methods import low_rank_filter_revised as lrkf
@@ -52,7 +54,7 @@ class MLPSurrogate(nn.Module):
         x = nn.elu(x)
         x = nn.Dense(1, name="last_layer")(x)
         return x
-
+    
 
 def load_ll_lrkf_rbpf_agent(
         X, rank, cov_hidden=1e-4, cov_last=1.0, low_rank_diag=False,
@@ -224,12 +226,41 @@ def load_fifo_vbll_agent(
     return agent, bel_init_fn
 
 
+def load_ll_laplace_agent(
+        X, learning_rate, buffer_size, n_inner, noise=1.0):
+    def lossfn(params, counter, x, y, apply_fn):
+        res = apply_fn(params, x).squeeze()
+        # logprobas = distrax.Normal(loc=res.squeeze(), scale=noise).log_prob(y.squeeze())
+        logprobas = jax.scipy.stats.norm.logpdf(y.squeeze(), res.squeeze(), noise)
+        loss = - (logprobas * counter).sum() / counter.sum()
+        return loss.squeeze()
+    
+    surrogate = MLPSurrogate()
+    agent = FifoLaplaceDiag(
+        surrogate.apply,
+        lossfn,
+        tx=optax.adamw(learning_rate),
+        buffer_size=buffer_size,
+        dim_features=X.shape[-1],
+        dim_output=1,
+        n_inner=n_inner,
+    )
+
+    def bel_init_fn(key):
+        params_init = surrogate.init(key, X)
+        bel_init = agent.init_bel(params_init)
+        return bel_init
+    
+    return agent, bel_init_fn
+
+
 AGENTS = {
     "VBLL-greedy": load_fifo_vbll_agent,
     "VBLL": load_fifo_vbll_agent,
     "GP": load_gp_agent,
-    "En-FLoRES": load_ll_lrkf_ensemble_agent,
+    # "En-FLoRES": load_ll_lrkf_ensemble_agent,
     "FLoRES": load_ll_lrkf_agent,
     "LRKF": load_lrkf_agent,
     "LOFI": load_lofi_agent,
+    "laplace": load_ll_laplace_agent,
 }

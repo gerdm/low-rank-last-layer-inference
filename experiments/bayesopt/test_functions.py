@@ -140,4 +140,6 @@ EXPRIMENTS = {
     "branin": branin,
     "ackley2": ackley,
     "ackley5": ackley,
+    "ackley10": ackley,
+    "ackley50": ackley,
 }
