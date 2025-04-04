@@ -215,6 +215,9 @@ class FifoLaplaceDiag(FifoSGD):
             return self.apply_fn(params_sample, x).squeeze()
         return fn
 
+    def predict(self, bel):
+        return bel
+    
     def sample_params(self, key, bel):
         # Get last-layer params
         params = jax.tree.map(jnp.copy, bel.params)
@@ -257,15 +260,23 @@ class FifoLaplaceDiag(FifoSGD):
         # rebund the params
         params_sample = rfn_all(params_sample)
         return params_sample
+
+    def sample_predictive(self, key, bel, x, n_samples=100, sigma2=1e-2):
+        # Split the key into n_samples keys.
+        keys = jax.random.split(key, n_samples)
+        
+        def one_sample_predictive(k):
+            key_params, key_noise = jax.random.split(k)
+            params_sample = self.sample_params(key_params, bel)
+            # Compute the predictive mean via forward pass.
+            mu = self.apply_fn(params_sample, x)
+            noise = jax.random.normal(key_noise, shape=mu.shape) * jnp.sqrt(sigma2)
+            return mu + noise
+        
+        # Vectorize the sampling procedure.
+        predictions = jax.vmap(one_sample_predictive)(keys)
+        return predictions.mean(axis=0)
+
     
-
-    def predictive_density(self, bel, x):
-        raise NotImplementedError("Predictive density not implemented for FifoLaplaceDiag")
-
-    def sample_predictive(self, key, bel, x):
-        dist = self.predictive_density(bel, x)
-        sample = dist.sample(seed=key)
-        return sample
-
     def update(self, bel, y, x):
         return self.update_state(bel, x, y)
