@@ -228,6 +228,7 @@ def load_fifo_vbll_agent(
 
 def load_ll_laplace_agent(
         X, learning_rate, buffer_size, n_inner, noise=1.0):
+
     def lossfn(params, counter, x, y, apply_fn):
         res = apply_fn(params, x).squeeze()
         # logprobas = distrax.Normal(loc=res.squeeze(), scale=noise).log_prob(y.squeeze())

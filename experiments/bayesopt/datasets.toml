@@ -20,9 +20,9 @@
     n_eval = 100
 
 [experiment.ackley10]
-    dim = 5
+    dim = 10
     n_eval = 100
 
 [experiment.ackley50]
-    dim = 5
+    dim = 50
     n_eval = 100
