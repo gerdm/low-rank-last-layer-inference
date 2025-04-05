@@ -1,21 +1,21 @@
 [VBLL]
-    learning_rate = 1e-3
+    learning_rate = 1e-4
     buffer_size = 100
     n_inner = 1000
     wishart_scale = 0.1
     regularization_weight = 0.1
 
 [VBLL-greedy]
-    learning_rate = 1e-3
-    buffer_size = 10
-    n_inner = 100
-    wishart_scale = 0.01
+    learning_rate = 1e-4
+    buffer_size = 50
+    n_inner = 2
+    wishart_scale = 0.02
     regularization_weight = 0.0
 
 [GP]
     lenght_scale = 0.1 
     nu = "5/2"
-    buffer_size = 20
+    buffer_size = 20 
     obs_noise = 0.0
 
 [LRKF]
@@ -31,12 +31,6 @@
     cov_last = 1.0
     low_rank_diag = false
 
-[En-FLoRES]
-    rank = 50
-    cov_hidden = 1e-4
-    cov_last = 0.01
-    low_rank_diag = true
-    num_particles = 5
 
 [LOFI]
     rank = 50
