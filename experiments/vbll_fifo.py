@@ -218,28 +218,6 @@ class FifoLaplaceDiag(FifoSGD):
     def predict(self, bel):
         return bel
     
-    def get_posterior_predictive(self, bel, x):
-        params = jax.tree.map(jnp.copy, bel.params)
-        params_last = params["params"].pop("last_layer")
-        params_last_flat, rfn_last = ravel_pytree(params_last)
-
-
-        def apply_fn(params_last, params_hidden, x):
-            params = {
-                "params": {
-                    "last_layer": rfn_last(params_last),
-                    **params_hidden,
-                }
-            }
-            return self.apply_fn(params, x).squeeze()
-        
-        *_, H = self._get_hessian_means(bel)
-
-        grad_last = jax.jacrev(apply_fn, argnums=0)(params_last_flat, params["params"], x)
-        map_est = apply_fn(params_last_flat, params["params"], x)
-        cov = jnp.einsum("ij,jk,lk->il", grad_last, jnp.linalg.inv(H), grad_last) + 0.1 * jnp.eye(grad_last.shape[0])
-        return distrax.MultivariateNormalFullCovariance(loc=map_est, covariance_matrix=cov)
-
 
     def _get_hessian_means(self, bel):
         params = jax.tree.map(jnp.copy, bel.params)
@@ -265,10 +243,38 @@ class FifoLaplaceDiag(FifoSGD):
         grad_norm = jnp.linalg.norm(grad, axis=-1, keepdims=True)
         grad = grad / (grad_norm + 1e-6)  # Normalize gradients to have unit norm
 
-        hessian = jnp.einsum("ij,ik->ijk", grad, grad)
-        H = (hessian * bel.counter[:, None, None]).sum(axis=0) / bel.counter.sum() + 1e-4 * jnp.eye(hessian.shape[-1])
-        return params_last_flat, params_hidden_flat, rfn_all, H
-    
+        fisher = jnp.einsum("ij,ik->ijk", grad, grad)
+        F = (fisher * bel.counter[:, None, None]).sum(axis=0) / bel.counter.sum()+ 1e-4 * jnp.eye(fisher.shape[-1])
+        return params_last_flat, params_hidden_flat, rfn_all, F
+
+
+    def get_posterior_predictive(self, bel, x):
+        params = jax.tree.map(jnp.copy, bel.params)
+        params_last = params["params"].pop("last_layer")
+        params_last_flat, rfn_last = ravel_pytree(params_last)
+
+
+        def apply_fn(params_last, params_hidden, x):
+            params = {
+                "params": {
+                    "last_layer": rfn_last(params_last),
+                    **params_hidden,
+                }
+            }
+            res =  self.apply_fn(params, x).squeeze()
+            return res
+        
+        *_, H = self._get_hessian_means(bel)
+
+        grad_last = jax.jacrev(apply_fn, argnums=0)(params_last_flat, params["params"], x)
+        map_est = apply_fn(params_last_flat, params["params"], x)
+        map_est = jax.nn.softmax(map_est)
+        # TODO: this should be implemented in a child class (or given by the user)
+        Rt = jnp.diag(map_est) - jnp.outer(map_est, map_est)
+        cov = jnp.einsum("ij,jk,lk->il", grad_last, H, grad_last) + 0.1 * jnp.eye(grad_last.shape[0]) + Rt
+        return distrax.MultivariateNormalFullCovariance(loc=map_est, covariance_matrix=cov)
+
+
     def sample_params(self, key, bel):
         params_last_flat, params_hidden_flat, rfn_all, H = self._get_hessian_means(bel)
 
