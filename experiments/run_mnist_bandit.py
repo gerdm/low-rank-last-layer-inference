@@ -100,7 +100,7 @@ def cov_fn(eta, eps=0.1):
 def run_agent_ts(bel_init, context_init, state_init, env_params, n_steps):
     u_init = (bel_init, context_init, state_init)
     _step = partial(step_ts, agent=agent, env_params=env_params)
-    state_final, (actions, rewards) = jax.lax.scan(_step, u_init, jnp.arange(n_steps))
+    (bel_final, *_), (actions, rewards) = jax.lax.scan(_step, u_init, jnp.arange(n_steps))
     rewards = jax.block_until_ready((rewards + 1) / 2)
     return actions, rewards
 
