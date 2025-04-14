@@ -138,7 +138,9 @@ def run_epsilon_greedy(agent, key, eps, num_steps, base_path, num_trials):
     path_out = os.path.join(base_path, filename)
     with open(path_out, "wb") as f:
         pickle.dump(res, f)
+    average_reward = np.mean(rewards.sum(axis=-1), axis=0)
     print(f"Results saved to {path_out}")
+    print(f"Average cumulative reward: {average_reward:0.2f}")
     print(f"Total time: {time_end - time_init:.4f} seconds")
 
 
@@ -173,7 +175,10 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     path_out = os.path.join(base_path, filename)
     with open(path_out, "wb") as f:
         pickle.dump(res, f)
+    
+    average_reward = np.mean(rewards.sum(axis=-1), axis=0)
     print(f"Results saved to {path_out}")
+    print(f"Average cumulative reward: {average_reward:0.2f}")
     print(f"Total time: {time_end - time_init:.4f} seconds")
 
 @click.group()

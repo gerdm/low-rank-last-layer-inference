@@ -110,8 +110,8 @@ def agent_flores():
         partial(mean_fn, model=model),
         cov_fn,
         rank=50,
-        dynamics_hidden=1e-3,
-        dynamics_last=1e-3,
+        dynamics_hidden=0.0,
+        dynamics_last=0.0,
     )
     init_params = {
         "low_rank_diag": True,
