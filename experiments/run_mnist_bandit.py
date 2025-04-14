@@ -142,5 +142,45 @@ def run_experiment(agent, key, eps, num_steps, base_path, num_trials):
     print(f"Total time: {time_end - time_init:.4f} seconds")
 
 
+@click.command()
+@click.option("--agent", help="Agent to run")
+@click.option("--key", default=314, help="Random key")
+@click.option("--num_steps", default=40_000, help="Total number of observations")
+@click.option("--base_path", default=".", help="Base path for saving results")
+@click.option("--num_trials", default=1, help="Number of simulations ot run")
+def run_experiment_ts(agent, key, num_steps, base_path, num_trials):
+    print(f"Running {agent} agent")
+    key = jax.random.PRNGKey(key)
+    key_params, key_run = jax.random.split(key)
+    params_init = model.init(key_params, jnp.ones((28, 28, 1)))
+
+    agent_instance, init_kwargs = agents[agent]()
+    bel_init = agent_instance.init_bel(params_init, **init_kwargs)
+
+    step_fn_config = {"eps": eps}
+    keys_run = jax.random.split(key_run, num_trials)
+    time_init = time()
+    actions, rewards = run_agents(keys_run, agent_instance, bel_init, num_steps, step_egreedy, step_fn_config)
+    res = {
+        "actions": actions,
+        "rewards": rewards,
+    }
+    res = jax.tree.map(np.array, res)
+    time_end = time()
+    res = {"time": time_end - time_init, **res}
+
+    filename = f"{agent}_ts.pkl"
+    path_out = os.path.join(base_path, filename)
+    with open(path_out, "wb") as f:
+        pickle.dump(res, f)
+    print(f"Results saved to {path_out}")
+    print(f"Total time: {time_end - time_init:.4f} seconds")
+
+
+
 if __name__ == "__main__":
+    """
+    Example usage:
+    python -W ignore run_mnist_bandit.py --base_path output --num_trials 10 --agent OGD-adamw
+    """
     run_experiment()

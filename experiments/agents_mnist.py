@@ -88,6 +88,20 @@ def agent_ogd():
     )
     return agent, {}
 
+def agent_ogd_muon():
+    buffer_size = 1
+    n_inner = 1
+    learning_rate = 1e-4
+    agent = FifoLaplaceDiag(
+        partial(mean_fn, model=model),
+        lossfn,
+        tx=optax.contrib.muon(learning_rate),
+        buffer_size=buffer_size,
+        dim_features = 28 ** 2 + 1,
+        dim_output=1,
+        n_inner=n_inner,
+    )
+    return agent, {}
 
 def agent_flores():
     agent = flores.LowRankLastLayer(
@@ -140,6 +154,7 @@ def agent_lofi():
 agents = {
     "LRKF": agent_lrkf,
     "FLoRES": agent_flores,
-    "OGD": agent_ogd,
+    "OGD-adamw": agent_ogd,
+    "OGD-muon": agent_ogd_muon,
     "LoFi": agent_lofi
 }
