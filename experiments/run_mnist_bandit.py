@@ -69,14 +69,14 @@ def step_ts(state, t, agent, key_base, env, env_params):
     bel, context, env_state = state
     
     # Take action
-    yhat = agent.sample_predictive(key_take, bel, context[..., None])
+    yhat = agent.sample_predictive(key_take, bel, context.ravel())
     action = yhat.argmax()
     
     # Obtain reward
     y = jax.nn.one_hot(env_state.correct_label, 10)[action]
 
     # Update belief
-    X = (action, context[..., None])
+    X = jnp.concat([jnp.array([action]), context.ravel()])
     bel_update = agent.update(bel, y, X)
 
     # Take next step
@@ -159,7 +159,8 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
 
     keys_run = jax.random.split(key_run, num_trials)
     time_init = time()
-    actions, rewards = run_agents(keys_run, agent_instance, bel_init, num_steps, step_egreedy, step_fn_config)
+    step_fn_config = {}
+    actions, rewards = run_agents(keys_run, agent_instance, bel_init, num_steps, step_ts, step_fn_config)
     res = {
         "actions": actions,
         "rewards": rewards,
@@ -187,5 +188,6 @@ if __name__ == "__main__":
     """
     Example usage:
     python -W ignore run_mnist_bandit.py run_epsilon_greedy --base_path output --num_trials 10 --agent OGD-adamw
+    python -W ignore run_mnist_bandit.py run_ts --base_path output --num_trials 10 --agent OGD-adamw
     """
     cli()
