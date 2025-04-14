@@ -79,6 +79,7 @@ def agent_ogd():
     learning_rate = 1e-4
     agent = FifoLaplaceDiag(
         partial(mean_fn, model=model),
+        cov_fn,
         lossfn,
         tx=optax.adamw(learning_rate),
         buffer_size=buffer_size,
@@ -94,6 +95,7 @@ def agent_ogd_muon():
     learning_rate = 1e-4
     agent = FifoLaplaceDiag(
         partial(mean_fn, model=model),
+        cov_fn,
         lossfn,
         tx=optax.contrib.muon(learning_rate),
         buffer_size=buffer_size,
@@ -154,7 +156,7 @@ def agent_lofi():
 agents = {
     "LRKF": agent_lrkf,
     "FLoRES": agent_flores,
-    "OGD-adamw": agent_ogd,
-    "OGD-muon": agent_ogd_muon,
+    "adamw": agent_ogd,
+    "muon": agent_ogd_muon,
     "LoFi": agent_lofi
 }

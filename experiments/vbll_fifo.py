@@ -173,6 +173,10 @@ class RegressionRefac(nn.Module):
 
 class FifoVBLL(FifoSGD):
     def __init__(self, apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner=1):
+        """
+        This class assumes that apply_fn is a flax neural net with last layer given
+        by Regression or RegressionRefac
+        """
         super().__init__(apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner)
 
     def sample_fn(self, key, bel):
@@ -205,8 +209,9 @@ class FifoLaplaceDiag(FifoSGD):
     """
     TODO: rename to FifoLaplaceReg
     """
-    def __init__(self, apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner=1):
+    def __init__(self, apply_fn, cov_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner=1):
         super().__init__(apply_fn, lossfn, tx, buffer_size, dim_features, dim_output, n_inner)
+        self.cov_fn = cov_fn
 
     def sample_fn(self, key, bel):
         # Sample from last-layer params
@@ -267,11 +272,13 @@ class FifoLaplaceDiag(FifoSGD):
         *_, H = self._get_hessian_means(bel)
 
         grad_last = jax.jacrev(apply_fn, argnums=0)(params_last_flat, params["params"], x)
-        map_est = apply_fn(params_last_flat, params["params"], x)
-        map_est = jax.nn.softmax(map_est)
+        grad_last = jnp.atleast_2d(grad_last)
+        map_est = jnp.atleast_1d(apply_fn(params_last_flat, params["params"], x))
+        # map_est = jax.nn.softmax(map_est)
         # TODO: this should be implemented in a child class (or given by the user)
-        Rt = jnp.diag(map_est) - jnp.outer(map_est, map_est)
-        cov = jnp.einsum("ij,jk,lk->il", grad_last, H, grad_last) + 0.1 * jnp.eye(grad_last.shape[0]) + Rt
+        # Rt = jnp.diag(map_est) - jnp.outer(map_est, map_est)
+        Rt = self.cov_fn(map_est)
+        cov = jnp.einsum("ij,jk,lk->il", grad_last, H, grad_last) + Rt # + 0.1 * jnp.eye(grad_last.shape[0])
         return distrax.MultivariateNormalFullCovariance(loc=map_est, covariance_matrix=cov)
 
 

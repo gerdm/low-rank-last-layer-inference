@@ -112,7 +112,7 @@ def run_agents(
 @click.option("--num_steps", default=40_000, help="Total number of observations")
 @click.option("--base_path", default=".", help="Base path for saving results")
 @click.option("--num_trials", default=1, help="Number of simulations ot run")
-def run_experiment(agent, key, eps, num_steps, base_path, num_trials):
+def run_epsilon_greedy(agent, key, eps, num_steps, base_path, num_trials):
     print(f"Running {agent} agent")
     key = jax.random.PRNGKey(key)
     key_params, key_run = jax.random.split(key)
@@ -148,7 +148,7 @@ def run_experiment(agent, key, eps, num_steps, base_path, num_trials):
 @click.option("--num_steps", default=40_000, help="Total number of observations")
 @click.option("--base_path", default=".", help="Base path for saving results")
 @click.option("--num_trials", default=1, help="Number of simulations ot run")
-def run_experiment_ts(agent, key, num_steps, base_path, num_trials):
+def run_ts(agent, key, num_steps, base_path, num_trials):
     print(f"Running {agent} agent")
     key = jax.random.PRNGKey(key)
     key_params, key_run = jax.random.split(key)
@@ -157,7 +157,6 @@ def run_experiment_ts(agent, key, num_steps, base_path, num_trials):
     agent_instance, init_kwargs = agents[agent]()
     bel_init = agent_instance.init_bel(params_init, **init_kwargs)
 
-    step_fn_config = {"eps": eps}
     keys_run = jax.random.split(key_run, num_trials)
     time_init = time()
     actions, rewards = run_agents(keys_run, agent_instance, bel_init, num_steps, step_egreedy, step_fn_config)
@@ -176,11 +175,17 @@ def run_experiment_ts(agent, key, num_steps, base_path, num_trials):
     print(f"Results saved to {path_out}")
     print(f"Total time: {time_end - time_init:.4f} seconds")
 
+@click.group()
+def cli():
+    pass
+
+cli.add_command(run_epsilon_greedy)
+cli.add_command(run_ts)
 
 
 if __name__ == "__main__":
     """
     Example usage:
-    python -W ignore run_mnist_bandit.py --base_path output --num_trials 10 --agent OGD-adamw
+    python -W ignore run_mnist_bandit.py run_epsilon_greedy --base_path output --num_trials 10 --agent OGD-adamw
     """
-    run_experiment()
+    cli()
