@@ -104,6 +104,11 @@ def run_agents(
     return action, rewards
 
 
+def optimize_agent(
+    key, agent, bel_init, n_steps, step_fn, step_fn_kwargs
+):
+    ...
+
 
 @click.command()
 @click.option("--agent", help="Agent to run")
@@ -141,7 +146,7 @@ def run_epsilon_greedy(agent, key, eps, num_steps, base_path, num_trials):
     average_reward = np.mean(rewards.sum(axis=-1), axis=0)
     print(f"Results saved to {path_out}")
     print(f"Average cumulative reward: {average_reward:0.2f}")
-    print(f"Total time: {time_end - time_init:.4f} seconds")
+    print(f"Total time: {time_end - time_init:.4f} seconds", end="\n\n")
 
 
 @click.command()
@@ -179,11 +184,13 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     average_reward = np.mean(rewards.sum(axis=-1), axis=0)
     print(f"Results saved to {path_out}")
     print(f"Average cumulative reward: {average_reward:0.2f}")
-    print(f"Total time: {time_end - time_init:.4f} seconds")
+    print(f"Total time: {time_end - time_init:.4f} seconds", end="\n\n")
+
 
 @click.group()
 def cli():
     pass
+
 
 cli.add_command(run_epsilon_greedy)
 cli.add_command(run_ts)

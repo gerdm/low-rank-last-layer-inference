@@ -48,12 +48,12 @@ def mean_fn(params, x, model):
         raise ValueError("Undefined input dimension")
 
 
-def cov_fn(eta, eps=0.1):
+def cov_fn(eta, eps=1e-4):
     mean = jax.nn.softmax(jnp.atleast_1d(eta))
     return jnp.diag(mean) - jnp.outer(mean, mean) + jnp.eye(len(mean)) * eps
 
 
-def lossfn(params, counter, x, y, apply_fn, noise=0.1):
+def lossfn(params, counter, x, y, apply_fn, noise=0.01):
     x = jnp.atleast_2d(x)
     action = x[:, 0].astype(int)
     x = x[:, 1:].reshape(-1, 28, 28, 1)
@@ -73,10 +73,9 @@ def lossfn(params, counter, x, y, apply_fn, noise=0.1):
 ### Defining agents ###
 model = CNN(num_actions=10)
 
-def agent_ogd():
+
+def agent_ogd_adamw(n_inner=5, learning_rate=1e-4):
     buffer_size = 1
-    n_inner = 5
-    learning_rate = 1e-4
     agent = FifoLaplaceDiag(
         partial(mean_fn, model=model),
         cov_fn,
@@ -88,6 +87,7 @@ def agent_ogd():
         n_inner=n_inner,
     )
     return agent, {}
+
 
 def agent_ogd_muon():
     buffer_size = 1
@@ -105,49 +105,48 @@ def agent_ogd_muon():
     )
     return agent, {}
 
-def agent_flores():
+
+def agent_flores(cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
     agent = flores.LowRankLastLayer(
         partial(mean_fn, model=model),
         cov_fn,
         rank=50,
-        dynamics_hidden=0.0,
-        dynamics_last=0.0,
+        dynamics_hidden=dynamics_hidden,
+        dynamics_last=dynamics_last,
     )
     init_params = {
         "low_rank_diag": True,
-        "cov_hidden": 1.0,
-        "cov_last": 1.0
+        "cov_hidden": cov_init_hidden,
+        "cov_last": cov_init_last,
     }
     return agent, init_params
 
 
-def agent_lrkf():
+def agent_lrkf(cov_init=1.0, dynamics_covariance=1e-6):
     agent = lrkf.LowRankCovarianceFilter(
         partial(mean_fn, model=model),
         cov_fn,
         rank=50,
-        dynamics_covariance=1e-3,
+        dynamics_covariance=dynamics_covariance,
     )
 
     init_params = {
         "low_rank_diag": True,
-        "cov": 1.0
+        "cov": cov_init,
     }
 
     return agent, init_params
 
 
-def agent_lofi():
-    dynamics = 1e-3
-    rank = 50
+def agent_lofi(cov_init=1.0, dynamics=1e-4, rank=50):
     agent = lofi.LowRankPrecisionFilter(
         partial(mean_fn, model=model),
-        cov_fn,
+        partial(cov_fn, eps=0.1),
         dynamics_covariance=dynamics,
         rank=rank
     )
     init_params = {
-        "cov": 1.0
+        "cov": cov_init
     }
     return agent, init_params
 
@@ -156,7 +155,7 @@ def agent_lofi():
 agents = {
     "LRKF": agent_lrkf,
     "FLoRES": agent_flores,
-    "adamw": agent_ogd,
+    "adamw": agent_ogd_adamw,
     "muon": agent_ogd_muon,
     "LoFi": agent_lofi
 }
