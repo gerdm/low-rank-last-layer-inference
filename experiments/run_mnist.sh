@@ -1,5 +1,5 @@
 export num_steps=40000
-export num_trials=1
+export num_trials=10
 export key=3141
 
 ## Epsilon Greedy

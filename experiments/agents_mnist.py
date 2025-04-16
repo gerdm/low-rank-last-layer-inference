@@ -89,10 +89,7 @@ def agent_ogd_adamw(n_inner=5, learning_rate=1e-4):
     return agent, {}
 
 
-def agent_ogd_muon():
-    buffer_size = 1
-    n_inner = 1
-    learning_rate = 1e-4
+def agent_ogd_muon(buffer_size=1, n_inner=1, learning_rate=1e-4):
     agent = FifoLaplaceDiag(
         partial(mean_fn, model=model),
         cov_fn,
@@ -138,10 +135,14 @@ def agent_lrkf(cov_init=1.0, dynamics_covariance=1e-6):
     return agent, init_params
 
 
-def agent_lofi(cov_init=1.0, dynamics=1e-4, rank=50):
+def agent_lofi(cov_init=jnp.exp(-8), dynamics=0.0, rank=50, eps=1e-4):
+    """
+    Following configuration in
+    https://github.com/probml/bandits/blob/main/demos/bandit-vs-memory.ipynb
+    """
     agent = lofi.LowRankPrecisionFilter(
         partial(mean_fn, model=model),
-        partial(cov_fn, eps=0.1),
+        partial(cov_fn, eps=eps),
         dynamics_covariance=dynamics,
         rank=rank
     )
