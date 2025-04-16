@@ -96,7 +96,7 @@ def run_agent(
     rewards = jax.block_until_ready((rewards + 1) / 2)
     return bel_final, actions, rewards
 
-@partial(jax.vmap, in_axes=(0, None, None, None, None, None))
+@partial(jax.vmap, in_axes=(0, None, 0, None, None, None))
 def run_agents(
     key, agent, bel_init, n_steps, step_fn, step_fn_kwargs
 ):
@@ -121,15 +121,23 @@ def run_epsilon_greedy(agent, key, eps, num_steps, base_path, num_trials):
     print(f"Running {agent} agent")
     key = jax.random.PRNGKey(key)
     key_params, key_run = jax.random.split(key)
-    params_init = model.init(key_params, jnp.ones((28, 28, 1)))
+
+    keys_params = jax.random.split(key_params, num_trials)
+    params_init_runs = jax.vmap(model.init, in_axes=(0, None))(keys_params, jnp.ones((28, 28, 1)))
 
     agent_instance, init_kwargs = agents[agent]()
-    bel_init = agent_instance.init_bel(params_init, **init_kwargs)
+
+    @jax.vmap
+    def init_agent(params):
+        bel_init = agent_instance.init_bel(params, **init_kwargs)
+        return bel_init
+
+    bel_init_runs = init_agent(params_init_runs)
 
     step_fn_config = {"eps": eps}
     keys_run = jax.random.split(key_run, num_trials)
     time_init = time()
-    actions, rewards = run_agents(keys_run, agent_instance, bel_init, num_steps, step_egreedy, step_fn_config)
+    actions, rewards = run_agents(keys_run, agent_instance, bel_init_runs, num_steps, step_egreedy, step_fn_config)
     res = {
         "actions": actions,
         "rewards": rewards,
@@ -159,15 +167,24 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     print(f"Running {agent} agent")
     key = jax.random.PRNGKey(key)
     key_params, key_run = jax.random.split(key)
-    params_init = model.init(key_params, jnp.ones((28, 28, 1)))
+
+    keys_params = jax.random.split(key_params, num_trials)
+    params_init_runs = jax.vmap(model.init, in_axes=(0, None))(keys_params, jnp.ones((28, 28, 1)))
 
     agent_instance, init_kwargs = agents[agent]()
-    bel_init = agent_instance.init_bel(params_init, **init_kwargs)
 
+    @jax.vmap
+    def init_agent(params):
+        bel_init = agent_instance.init_bel(params, **init_kwargs)
+        return bel_init
+
+    bel_init_runs = init_agent(params_init_runs)
+
+    step_fn_config = {}
     keys_run = jax.random.split(key_run, num_trials)
     time_init = time()
-    step_fn_config = {}
-    actions, rewards = run_agents(keys_run, agent_instance, bel_init, num_steps, step_ts, step_fn_config)
+    actions, rewards = run_agents(keys_run, agent_instance, bel_init_runs, num_steps, step_egreedy, step_fn_config)
+
     res = {
         "actions": actions,
         "rewards": rewards,
