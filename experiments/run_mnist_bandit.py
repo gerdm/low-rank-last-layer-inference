@@ -183,7 +183,7 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     step_fn_config = {}
     keys_run = jax.random.split(key_run, num_trials)
     time_init = time()
-    actions, rewards = run_agents(keys_run, agent_instance, bel_init_runs, num_steps, step_egreedy, step_fn_config)
+    actions, rewards = run_agents(keys_run, agent_instance, bel_init_runs, num_steps, step_ts, step_fn_config)
 
     res = {
         "actions": actions,
