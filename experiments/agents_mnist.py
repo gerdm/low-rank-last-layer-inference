@@ -103,11 +103,11 @@ def agent_ogd_muon(buffer_size=1, n_inner=1, learning_rate=1e-4):
     return agent, {}
 
 
-def agent_flores(cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
+def agent_flores(rank=50, cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
     agent = flores.LowRankLastLayer(
         partial(mean_fn, model=model),
         cov_fn,
-        rank=50,
+        rank=rank,
         dynamics_hidden=dynamics_hidden,
         dynamics_last=dynamics_last,
     )
@@ -115,6 +115,7 @@ def agent_flores(cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, d
         "low_rank_diag": True,
         "cov_hidden": cov_init_hidden,
         "cov_last": cov_init_last,
+        "low_rank_diag_last": False,
     }
     return agent, init_params
 

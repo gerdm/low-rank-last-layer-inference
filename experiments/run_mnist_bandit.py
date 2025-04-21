@@ -6,6 +6,7 @@ import gymnax
 import numpy as np
 import jax.numpy as jnp
 from time import time
+from datetime import datetime
 from functools import partial
 from agents_mnist import agents, model
 
@@ -104,11 +105,6 @@ def run_agents(
     return action, rewards
 
 
-def optimize_agent(
-    key, agent, bel_init, n_steps, step_fn, step_fn_kwargs
-):
-    ...
-
 
 @click.command()
 @click.option("--agent", help="Agent to run")
@@ -121,6 +117,8 @@ def run_epsilon_greedy(agent, key, eps, num_steps, base_path, num_trials):
     print(f"Running {agent} agent")
     key = jax.random.PRNGKey(key)
     key_params, key_run = jax.random.split(key)
+    date = datetime.now().strftime("%Y%m%d")
+    uid = date
 
     keys_params = jax.random.split(key_params, num_trials)
     params_init_runs = jax.vmap(model.init, in_axes=(0, None))(keys_params, jnp.ones((28, 28, 1)))
@@ -147,7 +145,7 @@ def run_epsilon_greedy(agent, key, eps, num_steps, base_path, num_trials):
     time_end = time()
     res = {"time": time_end - time_init, **res}
 
-    filename = f"{agent}_eps_{eps * 100:.0f}.pkl"
+    filename = f"{agent}_eps_{eps * 100:.0f}_{uid}.pkl"
     path_out = os.path.join(base_path, filename)
     with open(path_out, "wb") as f:
         pickle.dump(res, f)
@@ -167,6 +165,8 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     print(f"Running {agent} agent")
     key = jax.random.PRNGKey(key)
     key_params, key_run = jax.random.split(key)
+    date = datetime.now().strftime("%Y%m%d")
+    uid = date
 
     keys_params = jax.random.split(key_params, num_trials)
     params_init_runs = jax.vmap(model.init, in_axes=(0, None))(keys_params, jnp.ones((28, 28, 1)))
@@ -193,7 +193,7 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     time_end = time()
     res = {"time": time_end - time_init, **res}
 
-    filename = f"{agent}_ts.pkl"
+    filename = f"{agent}_ts_{uid}.pkl"
     path_out = os.path.join(base_path, filename)
     with open(path_out, "wb") as f:
         pickle.dump(res, f)
