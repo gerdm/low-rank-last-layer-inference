@@ -227,7 +227,7 @@ def load_fifo_vbll_agent(
 
 
 def load_ll_laplace_agent(
-        X, learning_rate, buffer_size, n_inner, noise=1.0):
+        X, learning_rate, buffer_size, n_inner, noise=1.0, obs_noise=0.0):
 
     def lossfn(params, counter, x, y, apply_fn):
         res = apply_fn(params, x).squeeze()
@@ -235,10 +235,12 @@ def load_ll_laplace_agent(
         logprobas = jax.scipy.stats.norm.logpdf(y.squeeze(), res.squeeze(), noise)
         loss = - (logprobas * counter).sum() / counter.sum()
         return loss.squeeze()
-    
+
+    def cov_fn(y): return obs_noise # Function interpolation does not require observation noise
     surrogate = MLPSurrogate()
     agent = FifoLaplaceDiag(
         surrogate.apply,
+        cov_fn,
         lossfn,
         tx=optax.adamw(learning_rate),
         buffer_size=buffer_size,
@@ -256,12 +258,11 @@ def load_ll_laplace_agent(
 
 
 AGENTS = {
+    "laplace": load_ll_laplace_agent,
+    "GP": load_gp_agent,
     "VBLL-greedy": load_fifo_vbll_agent,
     "VBLL": load_fifo_vbll_agent,
-    "GP": load_gp_agent,
-    # "En-FLoRES": load_ll_lrkf_ensemble_agent,
     "FLoRES": load_ll_lrkf_agent,
     "LRKF": load_lrkf_agent,
     "LOFI": load_lofi_agent,
-    "laplace": load_ll_laplace_agent,
 }

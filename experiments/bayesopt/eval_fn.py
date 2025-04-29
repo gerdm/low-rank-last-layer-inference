@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 from functools import partial
 from jaxopt import ProjectedGradient
-
+from jax.scipy.stats import norm
 from scipy.stats.qmc import Sobol
 
 def generate_sobol_sequence_jax(num_samples: int, dim: int = 200, scramble: bool = True, seed: int = 0):
@@ -90,7 +90,7 @@ def query_next_point_grid(key, fn, dim, lbound, ubound, n_samples=1_000):
     return x_next
 
 
-def step(
+def step_thompson_sampling(
         state, t, key, agent, objective_fn, dim, lbound, ubound, query_method="grid"
 ):
     bel, y_best = state
@@ -119,9 +119,50 @@ def step(
         "x": x_next.squeeze(),
         "y": y_next.squeeze(),
         "y_best": y_best.squeeze(),
-        # "rho": bel.rho.squeeze(),
-        # "log_weight": bel.log_weight.squeeze(),
-        # "ess": 1 / jnp.sum(jnp.exp(bel.log_weight) ** 2),
+    }
+
+    state_next = (bel, y_best)
+    return state_next, out
+
+
+def step_expected_improvement(
+        state, t, key, agent, objective_fn, dim, lbound, ubound, query_method="grid"
+):
+    bel, y_best = state
+    key_step = jax.random.fold_in(key, t)
+    key_step, key_guess = jax.random.split(key_step)
+
+
+    @jax.vmap # TODO: do we need this for the grid case? It messes with grad choice
+    def EI(x):
+        xi = 0.01
+        pp = agent.predictive_density(bel, x)
+        mean = pp.mean().squeeze()
+        var = pp.covariance().squeeze()
+        std = jnp.sqrt(var)
+        Z = (mean - y_best - xi) / std
+        ei = Z * norm.cdf(Z) + std * norm.pdf(Z)
+        return ei.squeeze()
+
+    # compute location of next best estimate and actual estimate
+    if query_method == "grid":
+        x_next = query_next_point_grid(key_guess, EI, dim, lbound, ubound)
+    elif query_method == "grad":
+        x_next = query_next_point_grad(key_guess, EI, dim, lbound, ubound)
+    else:
+        raise ValueError(f"Query method {query_method} not defined")
+
+    # Obtain true objective
+    y_next = objective_fn(x_next)
+    # update belief based on true observations
+    bel = agent.update(bel, y_next.squeeze(), x_next)
+
+    y_best = y_next * (y_next > y_best) + y_best * (y_next <= y_best)
+
+    out = {
+        "x": x_next.squeeze(),
+        "y": y_next.squeeze(),
+        "y_best": y_best.squeeze(),
     }
 
     state_next = (bel, y_best)
@@ -130,12 +171,20 @@ def step(
 
 def test_run(
         key, n_steps, agent, bel_init_fn, objective_fn,
-        dim, lbound, ubound, n_warmup=None, query_method="grid"
+        dim, lbound, ubound, n_warmup=None,
+        query_method="grid", exploration_method="thompson_sampling"
 ):
     n_warmup = dim if n_warmup is None else n_warmup
     key_init_x, key_eval, key_bel = jax.random.split(key, 3)
 
     bel_init = bel_init_fn(key_bel)
+
+    if exploration_method == "thompson_sampling":
+        step = step_thompson_sampling
+    elif exploration_method == "expected_improvement":
+        step = step_expected_improvement
+    else:
+        raise ValueError(f"Exploration method {exploration_method} not defined")
 
     # Warmup agent
     x_warmup = jax.random.uniform(key_init_x, shape=(n_warmup, dim), minval=lbound, maxval=ubound)
@@ -156,9 +205,8 @@ def test_run(
     return bel_final, hist
 
 
-# @partial(jax.jit, static_argnames=("agent", "n_steps", "objective_fn", "dim", "lbound", "ubound", "n_warmup"))
-@partial(jax.vmap, in_axes=(0, None, None, None, None, None, None, None, None, None))
-def test_runs(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup, query_method):
-    _, hist = test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup, query_method)
+@partial(jax.vmap, in_axes=(0, None, None, None, None, None, None, None, None, None, None))
+def test_runs(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup, query_method, exploration_method):
+    _, hist = test_run(key, n_steps, agent, bel_init, objective_fn, dim, lbound, ubound, n_warmup, query_method, exploration_method)
     return hist
 

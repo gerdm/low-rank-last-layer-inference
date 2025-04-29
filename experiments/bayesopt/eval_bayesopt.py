@@ -20,6 +20,7 @@ with open(path_dataset, "r") as f:
     dim = config_experiment["experiment"][fn_string]["dim"]
     n_runs = config_experiment["config"]["n_runs"]
     query_method = config_experiment["config"]["query_method"]
+    exploration_method = config_experiment["config"]["exploration_method"]
     key = int(config_experiment["config"]["key"])
     n_steps = config_experiment["experiment"][fn_string]["n_eval"]
     x_test = jnp.zeros(dim)
@@ -40,11 +41,11 @@ for name, load_agent in agents.AGENTS.items():
 
     time_init = time()
     runs = eval_fn.test_runs(
-        keys, n_steps, agent, init_fn, objective_fn, dim, lbound, ubound, dim, query_method
+        keys, n_steps, agent, init_fn, objective_fn, dim, lbound, ubound, dim, query_method, exploration_method
     )
     runs = jax.tree.map(np.array, runs)
     time_end = time()
     res[name] = {**runs, "time": time_end - time_init}
 
-with open(f"{fn_string}.pkl", "wb") as f:
+with open(f"{fn_string}_{exploration_method}.pkl", "wb") as f:
     pickle.dump(res, f)

@@ -204,6 +204,17 @@ class FifoVBLL(FifoSGD):
         pp = self.predict_obs(bel, x)
         return pp.predictive.covariance_diagonal
 
+    def predictive_density(self, bel, x):
+        """
+        Rebayes-mini compatible predictive density
+        """
+        pp = self.predict_obs(bel, x)
+        predictive = distrax.MultivariateNormalFullCovariance(
+            loc=pp.predictive.mean,
+            covariance_matrix=pp.predictive.covariance
+        )
+        return predictive
+
 
 class FifoLaplaceDiag(FifoSGD):
     """
@@ -280,7 +291,12 @@ class FifoLaplaceDiag(FifoSGD):
         Rt = self.cov_fn(map_est)
         cov = jnp.einsum("ij,jk,lk->il", grad_last, H, grad_last) + Rt # + 0.1 * jnp.eye(grad_last.shape[0])
         return distrax.MultivariateNormalFullCovariance(loc=map_est, covariance_matrix=cov)
-
+    
+    def predictive_density(self, bel, x):
+        """
+        Compute the predictive density of the model given the belief and input x.
+        """
+        return self.get_posterior_predictive(bel, x)
 
     def sample_params(self, key, bel):
         params_last_flat, params_hidden_flat, rfn_all, H = self._get_hessian_means(bel)
