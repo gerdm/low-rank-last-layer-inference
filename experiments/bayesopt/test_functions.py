@@ -44,6 +44,11 @@ def init_fn_draw_nn(key, dim):
     return objective_fn
 
 
+key = jax.random.PRNGKey(3141)
+drawnn50 = init_fn_draw_nn(key, 50)
+drawnn200 = init_fn_draw_nn(key, 200)
+
+
 def ackley_1d(x, y=0):
     out = (-20*jnp.exp(-0.2*jnp.sqrt(0.5*(x**2 + y**2))) 
            - jnp.exp(0.5*(jnp.cos(2*jnp.pi*x) + jnp.cos(2*jnp.pi*y)))
@@ -142,4 +147,6 @@ EXPRIMENTS = {
     "ackley5": ackley,
     "ackley10": ackley,
     "ackley50": ackley,
+    "nndraw50": drawnn50,
+    "nndraw200": drawnn200,
 }

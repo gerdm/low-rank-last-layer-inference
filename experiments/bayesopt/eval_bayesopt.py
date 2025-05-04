@@ -19,10 +19,10 @@ with open(path_dataset, "r") as f:
     config_experiment = toml.load(f)
     dim = config_experiment["experiment"][fn_string]["dim"]
     n_runs = config_experiment["config"]["n_runs"]
-    query_method = config_experiment["config"]["query_method"]
     exploration_method = config_experiment["config"]["exploration_method"]
     key = int(config_experiment["config"]["key"])
     n_steps = config_experiment["experiment"][fn_string]["n_eval"]
+    query_method = config_experiment["experiment"][fn_string]["query_method"]
     x_test = jnp.zeros(dim)
 
 def objective_fn(x):
@@ -35,10 +35,13 @@ keys = jax.random.split(key, n_runs)
 res = {}
 print(f"*** Running {fn_string} ***")
 for name, load_agent in agents.AGENTS.items():
+    if (name == "GP") and (query_method == "grad"):
+        print("GP agent not available for grad query method")
+        continue
+
     print(f"Eval {name}")
     config_agent = config_agents[name]
     agent, init_fn = load_agent(x_test, **config_agent)
-
     time_init = time()
     runs = eval_fn.test_runs(
         keys, n_steps, agent, init_fn, objective_fn, dim, lbound, ubound, dim, query_method, exploration_method

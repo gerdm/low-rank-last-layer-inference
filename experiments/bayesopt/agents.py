@@ -258,8 +258,8 @@ def load_ll_laplace_agent(
 
 
 AGENTS = {
-    "laplace": load_ll_laplace_agent,
     "GP": load_gp_agent,
+    "laplace": load_ll_laplace_agent,
     "VBLL-greedy": load_fifo_vbll_agent,
     "VBLL": load_fifo_vbll_agent,
     "FLoRES": load_ll_lrkf_agent,

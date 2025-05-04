@@ -1,29 +1,45 @@
 [config]
     n_runs = 10
     key = 314
-    query_method = "grid"
-    exploration_method = "expected_improvement"
+    exploration_method = "thompson_sampling"
 
 [experiment.hartmann]
     dim = 6
     n_eval = 40
+    query_method = "grid"
 
 [experiment.branin]
     dim = 2
     n_eval = 40
+    query_method = "grid"
 
 [experiment.ackley2]
     dim = 2
     n_eval = 40
+    query_method = "grid"
 
 [experiment.ackley5]
     dim = 5
     n_eval = 100
+    query_method = "grid"
 
 [experiment.ackley10]
     dim = 10
     n_eval = 100
+    query_method = "grid"
 
 [experiment.ackley50]
     dim = 50
     n_eval = 100
+    query_method = "grid"
+
+[experiment.drawnn50]
+    dim = 50
+    n_eval = 200
+    query_method = "grad"
+
+
+[experiment.drawnn200]
+    dim = 200
+    n_eval = 600
+    query_method = "grad"
