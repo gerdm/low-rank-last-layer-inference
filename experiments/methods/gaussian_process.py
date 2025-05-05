@@ -72,7 +72,6 @@ class FIFOGPState:
 
 class GaussianProcessRegression(BaseFilter):
     """
-    Rebayes-mini-compatible GP regressor
     """
     def __init__(self, obs_variance, kernel):
         self.kernel = kernel
