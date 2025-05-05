@@ -10,7 +10,7 @@ import flax.linen as nn
 from jax.flatten_util import ravel_pytree
 from dataclasses import dataclass
 from collections.abc import Callable
-from rebayes_mini.methods.replay_sgd import FifoSGD
+from methods.replay_sgd import FifoSGD
 from vbll.jax.utils.distributions import Normal, DenseNormal
 
 def KL(p, q_scale):

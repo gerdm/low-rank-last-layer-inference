@@ -4,9 +4,9 @@ import jax.numpy as jnp
 import flax.linen as nn
 from functools import partial
 from vbll_fifo import FifoLaplaceDiag
-from rebayes_mini.methods import low_rank_filter as lofi 
-from rebayes_mini.methods import low_rank_last_layer as flores
-from rebayes_mini.methods import low_rank_filter_revised as lrkf
+from methods import low_rank_filter as lofi 
+from methods import low_rank_last_layer as hilofi
+from methods import low_rank_filter_revised as lrkf
 
 class CNN(nn.Module):
     num_actions: int = 10
@@ -103,8 +103,8 @@ def agent_ogd_muon(buffer_size=1, n_inner=1, learning_rate=1e-4):
     return agent, {}
 
 
-def agent_flores(rank=50, cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
-    agent = flores.LowRankLastLayer(
+def agent_hilofi(rank=50, cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
+    agent = hilofi.LowRankLastLayer(
         partial(mean_fn, model=model),
         cov_fn,
         rank=rank,
@@ -120,8 +120,8 @@ def agent_flores(rank=50, cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidde
     return agent, init_params
 
 
-def agent_flores_lite(rank=50, rank_last=100, cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
-    agent = flores.LowRankLastLayer(
+def agent_hilofi_lite(rank=50, rank_last=100, cov_init_hidden=0.1, cov_init_last=0.1, dynamics_hidden=1e-6, dynamics_last=1e-6):
+    agent = hilofi.LowRankLastLayer(
         partial(mean_fn, model=model),
         cov_fn,
         rank=rank,
@@ -175,9 +175,9 @@ def agent_lofi(cov_init=jnp.exp(-8), dynamics=0.0, rank=50, eps=1e-4):
 
 agents = {
     "LRKF": agent_lrkf,
-    "FLoRES": agent_flores,
+    "FLoRES": agent_hilofi,
     "adamw": agent_ogd_adamw,
     "muon": agent_ogd_muon,
     "LoFi": agent_lofi,
-    "FLoRESLite": agent_flores_lite,
+    "FLoRESLite": agent_hilofi_lite,
 }

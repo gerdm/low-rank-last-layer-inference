@@ -1,15 +1,13 @@
 import jax
 import optax
-import rbpf_flores
 import jax.numpy as jnp
 import flax.linen as nn
-import distrax
 from fractions import Fraction
 from vbll_fifo import Regression, FifoVBLL, FifoLaplaceDiag
-from rebayes_mini.methods import low_rank_filter as lofi
-from rebayes_mini.methods import low_rank_last_layer as ll_lrkf
-from rebayes_mini.methods import low_rank_filter_revised as lrkf
-from rebayes_mini.methods import gaussian_process as gp
+from methods import low_rank_filter as lofi
+from methods import low_rank_last_layer as ll_lrkf
+from methods import low_rank_filter_revised as lrkf
+from methods import gaussian_process as gp
 
 
 class VBLLMLP(nn.Module):
@@ -55,62 +53,6 @@ class MLPSurrogate(nn.Module):
         x = nn.Dense(1, name="last_layer")(x)
         return x
     
-
-def load_ll_lrkf_rbpf_agent(
-        X, rank, cov_hidden=1e-4, cov_last=1.0, low_rank_diag=False,
-        obs_noise=0.0, dynamics_hidden=0.0, dynamics_last=0.0, dynamics_rho=0.05,
-        cov_rho_init=0.01,
-        num_particles=2,
-        resample_threshold=None
-):
-    surrogate = MLPSurrogate()
-
-    agent = rbpf_flores.LowRankLastLayerRBPF(
-        surrogate.apply, rank=rank, dynamics_hidden=dynamics_hidden, dynamics_last=dynamics_last,
-        sigma_rho=dynamics_rho, 
-        num_particles=num_particles,
-        resample_threshold=resample_threshold,
-    )
-
-    def bel_init_fn(key):
-        params_init = surrogate.init(key, X)
-        bel_init = agent.init_bel(
-            params_init,
-            cov_hidden=cov_hidden,
-            cov_last=cov_last,
-            cov_rho=cov_rho_init,
-            low_rank_diag=low_rank_diag,
-        )
-        return bel_init
-
-    return agent, bel_init_fn
-
-
-def load_ll_lrkf_ensemble_agent(
-        X, rank, cov_hidden=1e-4, cov_last=1.0, low_rank_diag=False,
-        obs_noise=0.0, dynamics_hidden=0.0, dynamics_last=0.0,
-        num_particles=2
-):
-    surrogate = MLPSurrogate()
-
-    def cov_fn(y): return obs_noise # Function interpolation does not require observation noise
-    agent = rbpf_flores.LowRankLastLayerEnsemble(
-        surrogate.apply, cov_fn, rank=rank, dynamics_hidden=dynamics_hidden, dynamics_last=dynamics_last,
-        num_particles=num_particles,
-    )
-
-    def bel_init_fn(key):
-        params_init = surrogate.init(key, X)
-        bel_init = agent.init_bel(
-            params_init,
-            cov_hidden=cov_hidden,
-            cov_last=cov_last,
-            low_rank_diag=low_rank_diag,
-        )
-        return bel_init
-
-    return agent, bel_init_fn
-
 
 def load_lrkf_agent(
         X, rank, cov=1.0, low_rank_diag=False, obs_noise=0.0, dynamics_cov=0.0

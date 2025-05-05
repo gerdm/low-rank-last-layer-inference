@@ -33,13 +33,13 @@
     n_eval = 100
     query_method = "grid"
 
-[experiment.drawnn50]
+[experiment.nndraw50]
     dim = 50
     n_eval = 200
     query_method = "grad"
 
 
-[experiment.drawnn200]
+[experiment.nndraw200]
     dim = 200
     n_eval = 600
     query_method = "grad"
