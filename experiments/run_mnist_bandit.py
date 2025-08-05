@@ -63,7 +63,10 @@ def step_egreedy(state, t, agent, key_base, env, env_params, eps):
     return (bel_update, context_new, env_state), (action, reward)
 
 
-def step_ts(state, t, agent, key_base, env, env_params):
+def step_predictive_bayes(state, t, agent, key_base, env, env_params):
+    """
+    Sequential decision making and update following the martingale-posterior approach
+    """
     key_step = jax.random.fold_in(key_base, t)
     key_step, key_take = jax.random.split(key_step)
     
@@ -71,6 +74,35 @@ def step_ts(state, t, agent, key_base, env, env_params):
     
     # Take action
     yhat = agent.sample_predictive(key_take, bel, context.ravel())
+    action = yhat.argmax()
+    
+    # Obtain reward
+    y = jax.nn.one_hot(env_state.correct_label, 10)[action]
+
+    # Update belief
+    X = jnp.concat([jnp.array([action]), context.ravel()])
+    bel_update = agent.update(bel, y, X)
+
+    # Take next step
+    context_new, env_state, reward, done, _ = env.step(key_step, env_state, action, env_params)
+
+    return (bel_update, context_new, env_state), (action, reward)
+
+
+
+def step_ts(state, t, agent, key_base, env, env_params):
+    """
+    Sequential decision making and update following classical Thompson Sampling
+    """
+    key_step = jax.random.fold_in(key_base, t)
+    key_step, key_take = jax.random.split(key_step)
+    
+    bel, context, env_state = state
+    
+    # Take action
+    params_sample = agent.sample_params(key_take, bel)
+    yhat = agent.mean_fn(params_sample, context.ravel())
+
     action = yhat.argmax()
     
     # Obtain reward
@@ -204,12 +236,62 @@ def run_ts(agent, key, num_steps, base_path, num_trials):
     print(f"Total time: {time_end - time_init:.4f} seconds", end="\n\n")
 
 
+@click.command()
+@click.option("--agent", help="Agent to run")
+@click.option("--key", default=314, help="Random key")
+@click.option("--num_steps", default=40_000, help="Total number of observations")
+@click.option("--base_path", default=".", help="Base path for saving results")
+@click.option("--num_trials", default=1, help="Number of simulations ot run")
+def run_predictive_bayes(agent, key, num_steps, base_path, num_trials):
+    print(f"Running {agent} agent")
+    key = jax.random.PRNGKey(key)
+    key_params, key_run = jax.random.split(key)
+    date = datetime.now().strftime("%Y%m%d")
+    uid = date
+
+    keys_params = jax.random.split(key_params, num_trials)
+    params_init_runs = jax.vmap(model.init, in_axes=(0, None))(keys_params, jnp.ones((28, 28, 1)))
+
+    agent_instance, init_kwargs = agents[agent]()
+
+    @jax.vmap
+    def init_agent(params):
+        bel_init = agent_instance.init_bel(params, **init_kwargs)
+        return bel_init
+
+    bel_init_runs = init_agent(params_init_runs)
+
+    step_fn_config = {}
+    keys_run = jax.random.split(key_run, num_trials)
+    time_init = time()
+    actions, rewards = run_agents(keys_run, agent_instance, bel_init_runs, num_steps, step_predictive_bayes, step_fn_config)
+
+    res = {
+        "actions": actions,
+        "rewards": rewards,
+    }
+    res = jax.tree.map(np.array, res)
+    time_end = time()
+    res = {"time": time_end - time_init, **res}
+
+    filename = f"{agent}_predictive_bayes_{uid}.pkl"
+    path_out = os.path.join(base_path, filename)
+    with open(path_out, "wb") as f:
+        pickle.dump(res, f)
+    
+    average_reward = np.mean(rewards.sum(axis=-1), axis=0)
+    print(f"Results saved to {path_out}")
+    print(f"Average cumulative reward: {average_reward:0.2f}")
+    print(f"Total time: {time_end - time_init:.4f} seconds", end="\n\n")
+
+
 @click.group()
 def cli():
     pass
 
 
 cli.add_command(run_epsilon_greedy)
+cli.add_command(run_predictive_bayes)
 cli.add_command(run_ts)
 
 
