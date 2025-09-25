@@ -227,6 +227,16 @@ class SquareRootFilter(BaseFilter):
         sample_params = jnp.einsum("ji,sj->si", bel.W, eps) + bel.mean
         return sample_params
 
+
+    def predictive_density(self, bel, X):
+        mean = self.mean_fn(bel.mean, X).astype(float)
+        Rt = jnp.atleast_2d(self.cov_fn(mean))
+        Ht = self.grad_mean(bel.mean, X)
+        covariance = Ht @ (bel.W.T @ bel.W) @ Ht.T + Rt
+        mean = jnp.atleast_1d(mean)
+        dist = distrax.MultivariateNormalFullCovariance(mean, covariance)
+        return dist
+
     def predict(self, bel):
         nparams = len(bel.mean)
         I = jnp.eye(nparams)
