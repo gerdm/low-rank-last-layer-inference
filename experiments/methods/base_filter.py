@@ -94,11 +94,13 @@ class ExtendedFilter(BaseFilter):
 
     def predictive_density(self, bel, X):
         mean = self.mean_fn(bel.mean, X).astype(float)
-        # mean = self.mean(eta)
-        Rt = jnp.atleast_2d(self.cov_fn(mean))
-        Ht = self.grad_mean(bel.mean, X)
+
+        # Rt = jnp.atleast_2d(self.cov_fn(mean))
+        Rt = jnp.eye(len(mean)) * self.cov_fn(mean)
+
+        Ht = jnp.atleast_2d(self.grad_mean(bel.mean, X).squeze())
         covariance = Ht @ bel.cov @ Ht.T + Rt
-        mean = jnp.atleast_1d(mean)
+        mean = jnp.atleast_1d(mean.squeeze())
         dist = distrax.MultivariateNormalFullCovariance(mean, covariance)
         return dist
 
@@ -228,6 +230,15 @@ class SquareRootFilter(BaseFilter):
         return sample_params
 
 
+    def predictive_density_joint(self, bel, X):
+        mean = self.mean_fn(bel.mean, X).astype(float)
+        Rt = jnp.eye(len(mean)) * self.cov_fn(mean)
+        Ht = jnp.atleast_2d(self.grad_mean(bel.mean, X).squeeze())
+        covariance = Ht @ (bel.W.T @ bel.W) @ Ht.T + Rt
+        mean = jnp.atleast_1d(mean.squeeze())
+        dist = distrax.MultivariateNormalFullCovariance(mean, covariance)
+        return dist
+    
     def predictive_density(self, bel, X):
         mean = self.mean_fn(bel.mean, X).astype(float)
         Rt = jnp.atleast_2d(self.cov_fn(mean))

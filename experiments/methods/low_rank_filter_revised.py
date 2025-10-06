@@ -69,6 +69,19 @@ class LowRankCovarianceFilter(BaseFilter):
         def fn(x): return self.mean_fn(params, x).squeeze()
         return fn
 
+    def predictive_density_joint(self, bel, x):
+        yhat = self.mean_fn(bel.mean, x).astype(float)
+        # Rt = jnp.atleast_2d(self.cov_fn(yhat))
+        Rt = jnp.eye(len(yhat)) * self.cov_fn(yhat)
+        Ht = jnp.atleast_2d(self.grad_mean_fn(bel.mean, x).squeeze())
+        W = bel.low_rank
+
+        C = jnp.r_[W @ Ht.T, jnp.sqrt(self.dynamics_covariance) * Ht.T]
+        S = C.T @ C + Rt
+        mean = jnp.atleast_1d(jnp.squeeze(yhat))
+        dist = distrax.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=S)
+        return dist
+
     def predictive_density(self, bel, x):
         yhat = self.mean_fn(bel.mean, x).astype(float)
         Rt = jnp.atleast_2d(self.cov_fn(yhat))

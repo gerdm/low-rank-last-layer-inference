@@ -149,6 +149,24 @@ class LowRankLastLayer(BaseFilter):
     def predict(self, bel):
         return bel
 
+ 
+    def predictive_density_joint(self, bel, x):
+        mean = self.mean_fn(bel.mean_hidden, bel.mean_last, x).astype(float)
+        Rt = jnp.eye(len(mean)) * self.covariance(mean)
+        # Jacobian for hidden and last layer
+        J_hidden = jnp.atleast_2d(self.jac_hidden(bel.mean_hidden, bel.mean_last, x).squeeze())
+        J_last = jnp.atleast_2d(self.jac_last(bel.mean_hidden, bel.mean_last, x).squeeze())
+
+        # Upper-triangular cholesky decomposition of the innovation
+        C = jnp.r_[
+            bel.loading_hidden @ J_hidden.T, jnp.sqrt(self.dynamics_hidden) * J_hidden.T,
+            bel.loading_last @ J_last.T, jnp.sqrt(self.dynamics_last) * J_last.T,
+        ]
+        S = jnp.einsum("ji,jk->ik", C, C) + Rt
+        mean = jnp.atleast_1d(jnp.squeeze(mean))
+        dist = distrax.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=S)
+        return dist
+
 
     def predictive_density(self, bel, x):
         yhat = self.mean_fn(bel.mean_hidden, bel.mean_last, x).astype(float)

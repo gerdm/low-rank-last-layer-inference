@@ -85,6 +85,33 @@ class LowRankPrecisionFilter(BaseFilter):
         return self.mean_fn(bel.mean, X)
 
 
+    def predictive_density_joint(self, bel, X):
+        """
+        Equation (59) - (61)
+        """
+        mean = self.mean_fn(bel.mean, X).astype(float)
+        # Rt = jnp.atleast_2d(self.cov_fn(mean))
+        Rt = jnp.eye(len(mean)) * self.cov_fn(mean)
+
+        Ht = jnp.atleast_2d(self.grad_mean(bel.mean, X).squeeze())
+
+        diag_inverse = 1 / bel.diagonal
+        C1 = jnp.einsum("ji,j,jk->ik", bel.low_rank, diag_inverse, bel.low_rank)
+        C1 = jnp.linalg.inv(jnp.eye(self.rank) + C1)
+
+        # Building these two terms explicitly is computationally expensive
+        # C2 = jnp.einsum("i,ij,jk,lk,l->il", diag_inverse, bel.low_rank, C1, bel.low_rank, diag_inverse)
+        # C3 = jnp.eye(len(bel.mean)) * diag_inverse  - C2
+        # covariance = jnp.einsum("ij,jk,lk->il", Ht, C3, Ht) + Rt
+        
+        cov1 = jnp.einsum("ij,kj,j->ik", Ht, Ht, diag_inverse, optimize=True)
+        cov2 = jnp.einsum("ai,i,ij,jk,lk,l,bl->ab", Ht, diag_inverse, bel.low_rank, C1, bel.low_rank, diag_inverse, Ht, optimize=True)
+        covariance = cov1 - cov2 + Rt
+
+        mean = jnp.atleast_1d(jnp.squeeze(mean))
+        predictive = distrax.MultivariateNormalFullCovariance(mean, covariance)
+        return predictive
+
     def predictive_density(self, bel, X):
         """
         Equation (59) - (61)
