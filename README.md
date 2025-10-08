@@ -1,4 +1,18 @@
-# Partially Bayesian Online Neural Network Training for Scalable Sequential Decision Making
+# Martingale Posterior Neural Networks for Fast Sequential Decision Making
+
+![hilofi-train](https://github.com/user-attachments/assets/d7c4e6ce-4389-4a94-816f-246491c17148)
+
+
+## Citation
+```bib
+@article{duran2025scalable,
+  title={Martingale Posterior Neural Networks for Fast Sequential Decision Making},
+  author={Duran-Martin, Gerardo and S{\'a}nchez-Betancourt, Leandro and Cartea, {\'A}lvaro and Murphy, Kevin},
+  journal={Advances in Neural Information Processing Systems},
+  volume={38},
+  year={2025}
+}
+```
 
 ## Overview
 The code is divided into notebooks and scripts.
